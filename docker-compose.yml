@@ -3,21 +3,24 @@ version: "3.8"
 services:
   # server:
   #   build: ./Server
-  # server1:
-  #   build:
-  #     context: ./Server
-  #   image: distributed_systems_a-2-server:latest
-  #   environment:
-  #     - HOSTNAME=Server1 # Set the desired HOSTNAME as an example
-  #     - SERVER_ID=1
-  #   ports:
-  #     - "5000:5000"
-  #   container_name: Server1
-  #   networks:
-  #     - net1
+  server1:
+    build:
+      context: ./Server
+    image: distributed_systems_a-3-server:latest
+    environment:
+      - HOSTNAME=Server1 # Set the desired HOSTNAME as an example
+      - SERVER_ID=1
+      - DBNAME=DB1
+    depends_on:
+      - db1
+    ports:
+      - "5000:5000"
+    container_name: Server1
+    networks:
+      - net1
 
   # server2:
-  #   image: distributed_systems_a-2-server:latest
+  #   image: distributed_systems_a-3-server:latest
   #   environment:
   #     - HOSTNAME=Server2 # Set the desired HOSTNAME as an example
   #     - SERVER_ID=2
@@ -28,7 +31,7 @@ services:
   #     - net1
 
   # server3:
-  #   image: distributed_systems_a-2-server:latest
+  #   image: distributed_systems_a-3-server:latest
   #   environment:
   #     - HOSTNAME=Server3 # Set the desired HOSTNAME as an example
   #     - SERVER_ID=3
@@ -38,24 +41,39 @@ services:
   #   networks:
   #     - net1
 
-  load_balancer:
+  # load_balancer:
+  #   build:
+  #     context: ./Load_Balancer
+  #   ports:
+  #     - "5000:5000"
+  #   networks:
+  #     - net1
+  #   # depends_on:
+  #   #   - server1
+  #   #   - server2
+  #   #   - server3
+  #   # environment:
+  #   #   - SERVER_NAMES=Server1,Server2,Server3
+  #   #   - COUNT=3
+  #   privileged: true
+  #   container_name: load_balancer
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+
+  db1:
     build:
-      context: ./Load_Balancer
-    ports:
-      - "5000:5000"
+      context: ./Server_DB
+    image: distributed_systems_a-3-db1:latest
+    # environment:
+      # - HOSTNAME=Server1 # Set the desired HOSTNAME as an example
+      # - SERVER_ID=1
+    # depends_on:
+      # - server1
+    # ports:
+      # - "5001:5000"
+    container_name: DB1
     networks:
       - net1
-    # depends_on:
-    #   - server1
-    #   - server2
-    #   - server3
-    # environment:
-    #   - SERVER_NAMES=Server1,Server2,Server3
-    #   - COUNT=3
-    privileged: true
-    container_name: load_balancer
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
 
 networks:
   net1:

@@ -691,7 +691,7 @@ def add_server():
             valid_server_name[hostname]=name
             validname = valid_server_name[hostname]
             res = os.popen(
-                f'sudo docker run --name "{validname}" --network distributed_systems_a-2_net1 --network-alias "{validname}" -e HOSTNAME="{validname}" -e SERVER_ID="{num}" -d distributed_systems_a-2-server').read()
+                f'sudo docker run --name "{validname}" --network distributed_systems_a-3_net1 --network-alias "{validname}" -e HOSTNAME="{validname}" -e SERVER_ID="{num}" -d distributed_systems_a-3-server').read()
 
         if len(res) == 0:
             response_json = {
