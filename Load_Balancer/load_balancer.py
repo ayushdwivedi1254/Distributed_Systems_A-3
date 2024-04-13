@@ -115,6 +115,104 @@ def generate_id(hostname):
 ################################################################################################
 
 
+#################################### INTERNAL ENDPOINTS ########################################
+
+@app.route('/readVariables', methods=['POST'])
+def get_variable_values():
+    global server_names
+    global valid_server_name
+    global removed_servers
+    global server_name_to_shards
+    global server_name_to_number
+    data = request.json
+    if not isinstance(data, list):
+        return jsonify({'error': 'Invalid request format'}), 400
+    response = {}
+    for variable_name in data:
+        if variable_name=="server_names":
+            response[variable_name]=server_names
+        elif variable_name=="valid_server_name":
+            response[variable_name]=valid_server_name
+        elif variable_name=="removed_servers":
+            response[variable_name]=removed_servers
+        elif variable_name=="server_name_to_shards":
+            response[variable_name]=server_name_to_shards
+        elif variable_name=="server_name_to_number":
+            response[variable_name]=server_name_to_number
+    return jsonify(response), 200
+
+@app.route('/setVariables', methods=['POST'])
+def set_variable_values():
+    global count
+    data = request.json
+    for key,value in data.items():
+        if key=="count":
+            count=count + value
+    return jsonify('success'), 200
+
+@app.route('/removeFromList', methods=['POST'])
+def remove_from_list():
+    global server_names
+    global suggested_random_server_id
+    global server_name_lock
+    global suggested_random_server_id_lock
+    global removed_servers
+    global removed_servers_lock
+    global MapT
+    data = request.json
+   
+    for key,value in data.items():
+        if key=="server_names":
+            try:
+                with server_name_lock:
+                    server_names.remove(value)
+            except ValueError:
+                print(f"{value} is not in the list.")
+        elif key=="suggested_random_server_id":
+            try:
+                with suggested_random_server_id_lock:
+                    suggested_random_server_id.remove(value)
+            except ValueError:
+                print(f"{value} is not in the list.")
+        elif key=="MapT":
+            res=value.split(',')
+            MapT[res[0]].discard(res[1])
+        elif key=="removed_servers":
+            try:
+                with removed_servers_lock:
+                    removed_servers.remove(value)
+            except ValueError:
+                print(f"{value} is not in the list.")
+
+
+    return jsonify('success'), 200
+
+@app.route('/deleteFromDict', methods=['POST'])
+def remove_from_dict():
+    global server_name_to_shards
+    global shard_id_to_consistent_hashing
+    global shard_id_to_consistent_hashing_lock
+    global server_name_to_number
+    data = request.json
+   
+    for key,value in data.items():
+        if key=="server_name_to_shards":
+            try:
+                del server_name_to_shards[value]
+            except ValueError:
+                print(f"{value} is not in the dict.")
+        elif key=="shard_id_to_consistent_hashing":
+            try:
+                res=value.split(',')
+                with shard_id_to_consistent_hashing_lock[res[0]]:
+                    shard_id_to_consistent_hashing[res[0]].remove_server(server_name_to_number[res[1]], res[1])
+            except ValueError:
+                print(f"{value} is not in the dict.")
+            
+
+    return jsonify('success'), 200
+################################################################################################
+
 def read_worker(thread_number):
     global count
     global server_names
@@ -504,7 +602,7 @@ num_read_workers = 100
 for _ in range(num_read_workers):
     threading.Thread(target=read_worker, args=(_,), daemon=True).start()
 
-threading.Thread(target=heartbeat, daemon=True).start()
+# threading.Thread(target=heartbeat, daemon=True).start()
 
 @app.route('/init', methods=['POST'])
 def initialize_database():

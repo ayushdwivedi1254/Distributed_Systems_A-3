@@ -41,36 +41,50 @@ services:
   #   networks:
   #     - net1
 
-  # load_balancer:
-  #   build:
-  #     context: ./Load_Balancer
-  #   ports:
-  #     - "5000:5000"
-  #   networks:
-  #     - net1
-  #   # depends_on:
-  #   #   - server1
-  #   #   - server2
-  #   #   - server3
-  #   # environment:
-  #   #   - SERVER_NAMES=Server1,Server2,Server3
-  #   #   - COUNT=3
-  #   privileged: true
-  #   container_name: load_balancer
-  #   volumes:
-  #     - /var/run/docker.sock:/var/run/docker.sock
+  load_balancer:
+    build:
+      context: ./Load_Balancer
+    ports:
+      - "5000:5000"
+    networks:
+      - net1
+    # depends_on:
+    #   - server1
+    #   - server2
+    #   - server3
+    # environment:
+    #   - SERVER_NAMES=Server1,Server2,Server3
+    #   - COUNT=3
+    privileged: true
+    container_name: load_balancer
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  shard_manager:
+    build:
+      context: ./Shard_Manager
+    # ports:
+    #   - "5000:5000"
+    networks:
+      - net1
+    depends_on:
+      - load_balancer
+    privileged: true
+    container_name: shard_manager
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   db1:
     build:
       context: ./Server_DB
     image: distributed_systems_a-3-db1:latest
     # environment:
-      # - HOSTNAME=Server1 # Set the desired HOSTNAME as an example
-      # - SERVER_ID=1
+    # - HOSTNAME=Server1 # Set the desired HOSTNAME as an example
+    # - SERVER_ID=1
     # depends_on:
-      # - server1
+    # - server1
     # ports:
-      # - "5001:5000"
+    # - "5001:5000"
     container_name: DB1
     networks:
       - net1

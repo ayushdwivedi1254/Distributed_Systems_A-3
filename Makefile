@@ -10,6 +10,9 @@ clean:
 	@if [ -n "$$(docker ps -a -q --filter ancestor=distributed_systems_a-3-load_balancer)" ]; then \
 		docker rm -f $$(docker ps -a -q --filter ancestor=distributed_systems_a-3-load_balancer); \
 	fi
+	@if [ -n "$$(docker ps -a -q --filter ancestor=distributed_systems_a-3-shard_manager)" ]; then \
+		docker rm -f $$(docker ps -a -q --filter ancestor=distributed_systems_a-3-shard_manager); \
+	fi
 	@if [ -n "$$(docker ps -a -q --filter ancestor=distributed_systems_a-3-server)" ]; then \
 		docker rm -f $$(docker ps -a -q --filter ancestor=distributed_systems_a-3-server); \
 	fi
@@ -18,4 +21,7 @@ clean:
 	fi
 	@if [ -n "$$(docker images -q distributed_systems_a-3-load_balancer)" ]; then \
 		docker rmi -f distributed_systems_a-3-load_balancer; \
+	fi
+	@if [ -n "$$(docker images -q distributed_systems_a-3-shard_manager)" ]; then \
+		docker rmi -f distributed_systems_a-3-shard_manager; \
 	fi
