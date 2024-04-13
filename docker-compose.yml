@@ -3,21 +3,21 @@ version: "3.8"
 services:
   # server:
   #   build: ./Server
-  server1:
-    build:
-      context: ./Server
-    image: distributed_systems_a-3-server:latest
-    environment:
-      - HOSTNAME=Server1 # Set the desired HOSTNAME as an example
-      - SERVER_ID=1
-      - DBNAME=DB1
-    depends_on:
-      - db1
-    ports:
-      - "5000:5000"
-    container_name: Server1
-    networks:
-      - net1
+  # server1:
+  #   build:
+  #     context: ./Server
+  #   image: distributed_systems_a-3-server
+  #   environment:
+  #     - HOSTNAME=Server1 # Set the desired HOSTNAME as an example
+  #     - SERVER_ID=1
+  #     - DBNAME=DB1
+  #   depends_on:
+  #     - db1
+  #   ports:
+  #     - "5000:5000"
+  #   container_name: Server1
+  #   networks:
+  #     - net1
 
   # server2:
   #   image: distributed_systems_a-3-server:latest
@@ -74,20 +74,20 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 
-  db1:
-    build:
-      context: ./Server_DB
-    image: distributed_systems_a-3-db1:latest
-    # environment:
-    # - HOSTNAME=Server1 # Set the desired HOSTNAME as an example
-    # - SERVER_ID=1
-    # depends_on:
-    # - server1
-    # ports:
-    # - "5001:5000"
-    container_name: DB1
-    networks:
-      - net1
+  # db1:
+  #   build:
+  #     context: ./Server_DB
+  #   image: distributed_systems_a-3-db
+  #   # environment:
+  #   # - HOSTNAME=Server1 # Set the desired HOSTNAME as an example
+  #   # - SERVER_ID=1
+  #   # depends_on:
+  #   # - server1
+  #   # ports:
+  #   # - "5001:5000"
+  #   container_name: DB1
+  #   networks:
+  #     - net1
 
 networks:
   net1:

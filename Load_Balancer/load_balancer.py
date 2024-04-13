@@ -788,8 +788,20 @@ def add_server():
             name=f"Server{num}"
             valid_server_name[hostname]=name
             validname = valid_server_name[hostname]
+            dbname=validname+"_db"
+            
             res = os.popen(
-                f'sudo docker run --name "{validname}" --network distributed_systems_a-3_net1 --network-alias "{validname}" -e HOSTNAME="{validname}" -e SERVER_ID="{num}" -d distributed_systems_a-3-server').read()
+                f'sudo docker run --name "{dbname}" --network distributed_systems_a-3_net1 --network-alias "{dbname}" -d distributed_systems_a-3-db').read()
+            
+            if len(res) == 0:
+                response_json = {
+                    "message": f"<Error> Failed to start database for server {hostname}",
+                    "status": "failure"
+                }
+                return jsonify(response_json), 400
+
+            res = os.popen(
+                f'sudo docker run --name "{validname}" --network distributed_systems_a-3_net1 --network-alias "{validname}" -e HOSTNAME="{validname}" -e SERVER_ID="{num}" -e DBNAME="{dbname}" -d distributed_systems_a-3-server').read()
 
         if len(res) == 0:
             response_json = {
@@ -940,7 +952,11 @@ def remove_server():
         res1 = os.system(f'sudo docker stop {validname}')
         res2 = os.system(f'sudo docker rm {validname}')
 
-        if res1 != 0 or res2 != 0:
+        dbname=validname+"_db"
+        res3=os.system(f'sudo docker stop {dbname}')
+        res4=os.system(f'sudo docker rm {dbname}')
+
+        if res1 != 0 or res2 != 0 or res3!=0 or res4!=0:
             response_json = {
                 "message": f"<Error> Failed to remove server {hostname}",
                 "status": "failure"

@@ -22,6 +22,7 @@ class ConnectionPool:
         # self.db_params = db_params
         self.max_connections = max_connections
         self.connection_pool = queue.Queue(max_connections)
+        self.connected=False
         self._initialize_pool()
 
     def open_connection(self):
@@ -67,9 +68,13 @@ class ConnectionPool:
             opened=False
             while(not opened):
                 opened=self.open_connection()
+        self.connected=True
 
     def get_connection(self):
         return self.connection_pool.get()
+
+    def connection_status(self):
+        return self.connected
 
     def close_all_connections(self):
         while not self.connection_pool.empty():
@@ -173,7 +178,9 @@ def config():
 
 @app.route('/heartbeat', methods=['GET'])
 def heartbeat():
-    return '', 200
+    if connection_pool.connection_status():
+        return '',200
+    return '',503
 
 @app.route('/copy', methods=['GET'])
 def copy():
