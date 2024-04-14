@@ -6,7 +6,7 @@ services:
   # server1:
   #   build:
   #     context: ./Server
-  #   image: distributed_systems_a-3-server
+  #   image: distributed_systems_a-3-server:latest
   #   environment:
   #     - HOSTNAME=Server1 # Set the desired HOSTNAME as an example
   #     - SERVER_ID=1
@@ -48,11 +48,13 @@ services:
       - "5000:5000"
     networks:
       - net1
-    # depends_on:
+    depends_on:
+      - metadata_db
     #   - server1
     #   - server2
     #   - server3
-    # environment:
+    environment:
+      - DBNAME=metadata_db
     #   - SERVER_NAMES=Server1,Server2,Server3
     #   - COUNT=3
     privileged: true
@@ -63,21 +65,39 @@ services:
   shard_manager:
     build:
       context: ./Shard_Manager
-    # ports:
-    #   - "5000:5000"
+    ports:
+      - "5001:5000"
     networks:
       - net1
     depends_on:
       - load_balancer
+      - metadata_db
+    environment:
+      - DBNAME=metadata_db
     privileged: true
     container_name: shard_manager
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 
+  metadata_db:
+    build:
+      context: ./Metadata_DB
+    # environment:
+    # - HOSTNAME=Server1 # Set the desired HOSTNAME as an example
+    # - SERVER_ID=1
+    # depends_on:
+    # - server1
+    ports:
+      - "5002:5000"
+    container_name: metadata_db
+    networks:
+      - net1
+    # volumes:
+    #   - ./db_scripts:/docker-entrypoint-initdb.d
   # db1:
   #   build:
   #     context: ./Server_DB
-  #   image: distributed_systems_a-3-db
+  #   image: distributed_systems_a-3-db1:latest
   #   # environment:
   #   # - HOSTNAME=Server1 # Set the desired HOSTNAME as an example
   #   # - SERVER_ID=1

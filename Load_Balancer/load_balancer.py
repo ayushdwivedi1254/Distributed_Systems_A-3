@@ -11,8 +11,13 @@ from itertools import dropwhile
 import re
 from ConsistentHashing import ConsistentHashing
 
-app = Flask(__name__)
+import psycopg2
+from psycopg2 import errorcodes
+import queue
 
+
+app = Flask(__name__)
+time.sleep(10)
 # backend_server = "http://server1:5000"
 # N = int(os.environ.get('COUNT', ''))
 N = 0
@@ -32,8 +37,8 @@ K = 9
 consistent_hashing = ConsistentHashing(count, M, K)
 
 # Extra data structures for Assignment-2
-MapT = defaultdict(set)
-ShardT = SortedDict()
+# MapT = defaultdict(set)
+# ShardT = SortedDict()
 schema = {}
 shards = {}
 server_name_to_shards = {}
@@ -158,7 +163,7 @@ def remove_from_list():
     global suggested_random_server_id_lock
     global removed_servers
     global removed_servers_lock
-    global MapT
+    # global MapT
     data = request.json
    
     for key,value in data.items():
@@ -174,9 +179,9 @@ def remove_from_list():
                     suggested_random_server_id.remove(value)
             except ValueError:
                 print(f"{value} is not in the list.")
-        elif key=="MapT":
-            res=value.split(',')
-            MapT[res[0]].discard(res[1])
+        # elif key=="MapT":
+        #     res=value.split(',')
+        #     MapT[res[0]].discard(res[1])
         elif key=="removed_servers":
             try:
                 with removed_servers_lock:
@@ -213,6 +218,81 @@ def remove_from_dict():
     return jsonify('success'), 200
 ################################################################################################
 
+################################################################################################
+class ConnectionPool:
+    # def __init__(self, db_params, max_connections=5):
+    def __init__(self,max_connections):
+        # self.db_params = db_params
+        self.max_connections = max_connections
+        self.connection_pool = queue.Queue(max_connections)
+        self.connected=False
+        self._initialize_pool()
+
+    def open_connection(self):
+        db_connection=None
+        try:
+            db_connection = psycopg2.connect(
+                host=db_name,
+                user="postgres",
+                password="abc",
+                # database="distributed_database"
+            )
+        except Exception as e:
+            print(f"Error connecting to database:{str(e)}",500)
+            return False
+        
+        cursor = db_connection.cursor()
+        cursor.execute("SELECT datname FROM pg_catalog.pg_database WHERE datname = 'distributed_database';")
+        db_connection.commit()
+        if cursor.fetchone() is None:
+            db_connection.autocommit = True
+            create_database_query="CREATE DATABASE distributed_database;"
+            cursor.execute(create_database_query)
+            db_connection.commit()
+        
+        cursor.close()
+        db_connection.close()
+
+        db_connection = psycopg2.connect(
+            host=db_name,
+            user="postgres",
+            password="abc",
+            database="distributed_database"
+        )
+        print("Connected to database")
+        self.connection_pool.put(db_connection)
+        return True
+
+    def return_connection(self,db_connection):
+        self.connection_pool.put(db_connection)
+
+    def _initialize_pool(self):
+        for _ in range(self.max_connections):
+            opened=False
+            while(not opened):
+                opened=self.open_connection()
+        self.connected=True
+
+    def get_connection(self):
+        return self.connection_pool.get()
+
+    def connection_status(self):
+        return self.connected
+
+    def close_all_connections(self):
+        while not self.connection_pool.empty():
+            db_connection = self.connection_pool.get()
+            db_connection.close()
+
+db_name = os.environ.get('DBNAME')
+connection_pool = ConnectionPool(max_connections=40)
+
+db_connection=None
+data_type_mapping = {
+    'Number': 'INT',   # Example mapping for 'Number' to 'INT'
+    'String': 'VARCHAR'  # Example mapping for 'String' to 'VARCHAR'
+}
+################################################################################################
 def read_worker(thread_number):
     global count
     global server_names
@@ -291,8 +371,8 @@ def write_worker(current_shard_id):
     global server_name_lock
     global lock
     global shards
-    global ShardT
-    global MapT
+    
+    
     global shard_id_to_write_request_lock
     global shard_id_to_write_request_queue
 
@@ -301,10 +381,16 @@ def write_worker(current_shard_id):
         request_data = shard_id_to_write_request_queue[current_shard_id].get()
 
         num_entries = request_data['num_entries']
-
+        query = f"SELECT valid_idx FROM ShardT WHERE Stud_id_low = {shards[current_shard_id]['Stud_id_low']} AND Shard_id = '{current_shard_id}'"
+        db_connection = connection_pool.get_connection()
+        cursor = db_connection.cursor()
+        cursor.execute(query)
+        temp_curr_idx = cursor.fetchone()[0]
+        cursor.close()
+        connection_pool.return_connection(db_connection)
         write_payload = {
             "shard": current_shard_id,
-            "curr_idx": ShardT[shards[current_shard_id]['Stud_id_low']]['valid_idx'],
+            "curr_idx": temp_curr_idx,
             "data": request_data['data_entries']
         }
 
@@ -313,7 +399,15 @@ def write_worker(current_shard_id):
         failed_entries = []
 
         with shard_id_to_write_request_lock[current_shard_id]:
-            server_names_list = MapT[current_shard_id]
+            query = f"SELECT Server_name FROM MapT WHERE Shard_id = '{current_shard_id}'"
+            db_connection = connection_pool.get_connection()
+            cursor = db_connection.cursor()
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            cursor.close()  
+            connection_pool.return_connection(db_connection)
+
+            server_names_list = [row[0] for row in rows]
             threads = []
             for server_name in server_names_list:
                 thread = threading.Thread(target=send_write_request, args=(server_name, write_payload, write_responses, error_message, failed_entries))
@@ -338,7 +432,13 @@ def write_worker(current_shard_id):
                     'responses': write_responses,
                     'failed_entries': failed_entries
                 })
-                ShardT[shards[current_shard_id]['Stud_id_low']]['valid_idx'] = ShardT[shards[current_shard_id]['Stud_id_low']]['valid_idx'] + num_entries
+                query = f"UPDATE ShardT SET valid_idx = valid_idx + {num_entries} WHERE Stud_id_low = {shards[current_shard_id]['Stud_id_low']} AND Shard_id = '{current_shard_id}'"
+                db_connection = connection_pool.get_connection()
+                cursor = db_connection.cursor()
+                cursor.execute(query)
+                db_connection.commit()
+                cursor.close()
+                connection_pool.return_connection(db_connection)
             else:
                 request_data['response_queue'].put({
                     'status_code': error_status_code,
@@ -367,7 +467,7 @@ def send_update_request(server_name, payload, update_responses, error_message):
         error_message.append(str(e))
 
 def update_worker(current_shard_id):
-    global MapT
+    
     global shard_id_to_write_request_lock
     global shard_id_to_update_request_queue
 
@@ -385,7 +485,15 @@ def update_worker(current_shard_id):
         error_message = []
 
         with shard_id_to_write_request_lock[current_shard_id]:
-            server_names_list = MapT[current_shard_id]
+            query = f"SELECT Server_name FROM MapT WHERE Shard_id = '{current_shard_id}'"
+            db_connection = connection_pool.get_connection()
+            cursor = db_connection.cursor()
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            cursor.close()  
+            connection_pool.return_connection(db_connection)
+
+            server_names_list = [row[0] for row in rows]
             threads = []
             for server_name in server_names_list:
                 thread = threading.Thread(target=send_update_request, args=(server_name, update_payload, update_responses, error_message))
@@ -438,7 +546,6 @@ def send_delete_request(server_name, payload, delete_responses, error_message):
         # delete_responses.append(response.json())
 
 def delete_worker(current_shard_id):
-    global MapT
     global shard_id_to_write_request_lock
     global shard_id_to_delete_request_queue
 
@@ -455,7 +562,15 @@ def delete_worker(current_shard_id):
         error_message = []
 
         with shard_id_to_write_request_lock[current_shard_id]:
-            server_names_list = MapT[current_shard_id]
+            query = f"SELECT Server_name FROM MapT WHERE Shard_id = '{current_shard_id}'"
+            db_connection = connection_pool.get_connection()
+            cursor = db_connection.cursor()
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            cursor.close()  
+            connection_pool.return_connection(db_connection)
+
+            server_names_list = [row[0] for row in rows]
             threads = []
             for server_name in server_names_list:
                 thread = threading.Thread(target=send_delete_request, args=(server_name, delete_payload, delete_responses, error_message))
@@ -479,7 +594,13 @@ def delete_worker(current_shard_id):
                     'message': "Updates successful",
                     'responses': delete_responses
                 })
-                ShardT[shards[current_shard_id]['Stud_id_low']]['valid_idx'] = ShardT[shards[current_shard_id]['Stud_id_low']]['valid_idx'] - 1
+                query = f"UPDATE ShardT SET valid_idx = valid_idx - 1 WHERE Stud_id_low = {shards[current_shard_id]['Stud_id_low']} AND Shard_id = '{current_shard_id}'"
+                db_connection = connection_pool.get_connection()
+                cursor = db_connection.cursor()
+                cursor.execute(query)
+                db_connection.commit()
+                cursor.close()
+                connection_pool.return_connection(db_connection)
             else:
                 request_data['response_queue'].put({
                     'status_code': error_status_code,
@@ -533,7 +654,13 @@ def heartbeat():
                         with suggested_random_server_id_lock:
                             suggested_random_server_id.remove(server_name_to_number[server_name])
                         for current_shard in server_name_to_shards[server_name]:
-                            MapT[current_shard].discard(server_name)
+                            query = f"DELETE FROM MapT WHERE Shard_id = '{current_shard}' AND Server_name = '{server_name}'"
+                            db_connection = connection_pool.get_connection()
+                            cursor = db_connection.cursor()
+                            cursor.execute(query)
+                            db_connection.commit()
+                            cursor.close()  
+                            connection_pool.return_connection(db_connection)
                             with shard_id_to_consistent_hashing_lock[current_shard]:
                                 shard_id_to_consistent_hashing[current_shard].remove_server(server_name_to_number[server_name], server_name)
                         del server_name_to_shards[server_name]
@@ -608,6 +735,21 @@ for _ in range(num_read_workers):
 def initialize_database():
     global schema
     # global N
+
+    # create metadata tables
+    db_connection = connection_pool.get_connection()
+    
+    create_ShardT_query = "CREATE TABLE IF NOT EXISTS ShardT (Stud_id_low SERIAL PRIMARY KEY,Shard_id VARCHAR,Shard_size INTEGER, valid_idx INTEGER)"
+    create_MapT_query = "CREATE TABLE IF NOT EXISTS MapT (Shard_id VARCHAR,Server_name VARCHAR,Primary_server VARCHAR)"
+    
+    cursor = db_connection.cursor()
+    cursor.execute(create_ShardT_query)
+    cursor.execute(create_MapT_query)
+    db_connection.commit()
+    cursor.close()
+    
+    connection_pool.return_connection(db_connection)
+    ####
     payload = request.json
 
     # Processing the payload
@@ -618,7 +760,21 @@ def initialize_database():
 
     # Populating servers with empty shard list with at most 3 shards
     shard_allotments = {}
-    for shard_id, server_ids in MapT.items():
+
+    mapt_copy = defaultdict(set)
+    query = "SELECT Shard_id, Server_name FROM MapT"
+    db_connection = connection_pool.get_connection()
+    cursor = db_connection.cursor()
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    cursor.close()
+    connection_pool.return_connection(db_connection)
+    for row in rows:
+        shard_id, server_name = row
+        mapt_copy[shard_id].add(server_name)
+
+    
+    for shard_id, server_ids in mapt_copy.items():
         shard_allotments[shard_id] = len(server_ids)
     for shard in shards_list:
         shard_allotments[shard['Shard_id']] = 0
@@ -692,9 +848,7 @@ def add_server():
     global lock
     global shards
     global schema
-    global MapT
     global server_name_to_shards
-    global ShardT
     global shard_id_to_consistent_hashing
     global shard_id_to_consistent_hashing_lock
     global shard_id_to_write_request_queue
@@ -748,8 +902,19 @@ def add_server():
     
     with server_name_lock:
         server_names_copy = server_names
-    MapT_copy = MapT
-    
+   
+    MapT_copy = defaultdict(set)
+    query = "SELECT Shard_id, Server_name FROM MapT"
+    db_connection = connection_pool.get_connection()
+    cursor = db_connection.cursor()
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    cursor.close()
+    connection_pool.return_connection(db_connection)
+    for row in rows:
+        shard_id, server_name = row
+        MapT_copy[shard_id].add(server_name)
+
     for new_shard in new_shards:
         shard_id = new_shard['Shard_id']
         # Add new shard details to shards_map
@@ -757,11 +922,15 @@ def add_server():
             'Stud_id_low': new_shard['Stud_id_low'],
             'Shard_size': new_shard['Shard_size']
         }
-        ShardT[new_shard['Stud_id_low']] = {
-            'Shard_id': shard_id,
-            'Shard_size': new_shard['Shard_size'],
-            'valid_idx': 0
-        }
+        
+        query = f"INSERT INTO ShardT (Stud_id_low, Shard_id, Shard_size, valid_idx) VALUES ({new_shard['Stud_id_low']}, '{shard_id}', {new_shard['Shard_size']}, 0)"
+        db_connection = connection_pool.get_connection()
+        cursor = db_connection.cursor()
+        cursor.execute(query)
+        db_connection.commit()
+        cursor.close()
+        connection_pool.return_connection(db_connection)
+
         shard_id_to_consistent_hashing_lock[shard_id] = threading.Lock()
         shard_id_to_consistent_hashing[shard_id] = ConsistentHashing(3, M, K)
         shard_id_to_write_request_lock[shard_id] = threading.Lock()
@@ -830,8 +999,14 @@ def add_server():
 
             server_name_to_shards[hostname] = servers[hostname]
             # populating MapT
+            db_connection = connection_pool.get_connection()
             for current_shard in servers[hostname]:
-                MapT[current_shard].add(hostname)
+                query = f"INSERT INTO MapT (Shard_id, Server_name, Primary_server) VALUES ('{current_shard}','{hostname}', NULL)"
+                cursor = db_connection.cursor()
+                cursor.execute(query)
+                db_connection.commit()
+                cursor.close()
+            connection_pool.return_connection(db_connection)
 
             # configure each server
             config_payload = {
@@ -897,9 +1072,8 @@ def remove_server():
     global server_name_lock
     global lock
     global shards
-    global MapT
     global server_name_to_shards
-    global ShardT
+
     global shard_id_to_consistent_hashing
     global shard_id_to_consistent_hashing_lock
     global shard_id_to_write_request_lock
@@ -972,12 +1146,29 @@ def remove_server():
                     suggested_random_server_id.remove(server_name_to_number[hostname])
                 # del valid_server_name[hostname]
                 for current_shard in server_name_to_shards[hostname]:
-                    MapT[current_shard].discard(hostname)
+                    query = f"DELETE FROM MapT WHERE Shard_id = '{current_shard}' AND Server_name = '{hostname}'"
+                    db_connection = connection_pool.get_connection()
+                    cursor = db_connection.cursor()
+                    cursor.execute(query)
+                    db_connection.commit()
+                    cursor.close() 
+
+                    count_query = f"SELECT COUNT(*) FROM MapT WHERE Shard_id = '{current_shard}'" 
+                    cursor = db_connection.cursor()
+                    cursor.execute(count_query)
+                    count_result = cursor.fetchone()[0]
+                    cursor.close()
+                    connection_pool.return_connection(db_connection)
                     with shard_id_to_consistent_hashing_lock[current_shard]:
                         shard_id_to_consistent_hashing[current_shard].remove_server(server_name_to_number[hostname], hostname)
-                    if(len(MapT[current_shard]) == 0):
-                        del MapT[current_shard]
-                        del ShardT[shards[current_shard]['Stud_id_low']]
+                    if(count_result == 0):
+                        query = f"DELETE FROM ShardT WHERE Stud_id_low = {shards[current_shard]['Stud_id_low']} AND Shard_id = '{current_shard}'"
+                        db_connection = connection_pool.get_connection()
+                        cursor = db_connection.cursor()
+                        cursor.execute(query)
+                        db_connection.commit()
+                        cursor.close()
+                        connection_pool.return_connection(db_connection)
                         del shards[current_shard]
                         del shard_id_to_consistent_hashing[current_shard]
                         del shard_id_to_consistent_hashing_lock[current_shard]
@@ -1005,7 +1196,7 @@ def remove_server():
 
 @app.route('/read', methods=['POST'])
 def read_data():
-    global ShardT
+
 
     # Extract low and high Student ID from the request payload
     payload = request.json
@@ -1026,7 +1217,22 @@ def read_data():
         return jsonify(response), 400
 
     # find the shards
-    starting_stud_id_low = lower_bound_entry(ShardT, low_id)
+    query = f"SELECT * FROM ShardT"
+    db_connection = connection_pool.get_connection()
+    cursor = db_connection.cursor()
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    cursor.close()
+    connection_pool.return_connection(db_connection)
+    shardt_copy=SortedDict()
+    for row in rows:
+        stud_id_low, shard_id, shard_size, valid_idx = row
+        shardt_copy[stud_id_low] = {
+            'Shard_id': shard_id,
+            'Shard_size': shard_size,
+            'valid_idx': valid_idx
+        }
+    starting_stud_id_low = lower_bound_entry(shardt_copy, low_id)
 
     # handle the case when shard list is empty
     if starting_stud_id_low == -1:
@@ -1037,7 +1243,7 @@ def read_data():
         }
         return jsonify(response), 200
     
-    for key, value in dropwhile(lambda item: item[0] < starting_stud_id_low, ShardT.items()):
+    for key, value in dropwhile(lambda item: item[0] < starting_stud_id_low, shardt_copy.items()):
         if high_id >= key:
             if low_id < key + value['Shard_size']:
                 shards_queried.append(value['Shard_id'])
@@ -1100,7 +1306,6 @@ def read_data():
 
 @app.route('/write', methods=['POST'])
 def write():
-    global ShardT
     global shard_id_to_write_request_queue
 
     payload = request.json
@@ -1109,11 +1314,26 @@ def write():
     total_entries = len(data_entries)
     shard_id_to_data_entries = {}
 
+    query = f"SELECT * FROM ShardT"
+    db_connection = connection_pool.get_connection()
+    cursor = db_connection.cursor()
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    cursor.close()
+    connection_pool.return_connection(db_connection)
+    shardt_copy=SortedDict()
+    for row in rows:
+        stud_id_low, shard_id, shard_size, valid_idx = row
+        shardt_copy[stud_id_low] = {
+            'Shard_id': shard_id,
+            'Shard_size': shard_size,
+            'valid_idx': valid_idx
+        }
     for entry in data_entries:
         current_stud_id = entry['Stud_id']
-        possible_stud_id_low = lower_bound_entry(ShardT, current_stud_id)
+        possible_stud_id_low = lower_bound_entry(shardt_copy, current_stud_id)
         current_shard_id = -1
-        for key, value in dropwhile(lambda item: item[0] < possible_stud_id_low, ShardT.items()):
+        for key, value in dropwhile(lambda item: item[0] < possible_stud_id_low, shardt_copy.items()):
             if current_stud_id >= key:
                 if current_stud_id >= key and current_stud_id < key + value['Shard_size']:
                     current_shard_id = value['Shard_id']
@@ -1179,17 +1399,32 @@ def write():
 
 @app.route('/update', methods=['PUT'])
 def update():
-    global ShardT
     global shard_id_to_update_request_queue
 
     payload = request.json
     Stud_id = payload['Stud_id']
     data = payload['data']
 
+    query = f"SELECT * FROM ShardT"
+    db_connection = connection_pool.get_connection()
+    cursor = db_connection.cursor()
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    cursor.close()
+    connection_pool.return_connection(db_connection)
+    shardt_copy=SortedDict()
+    for row in rows:
+        stud_id_low, shard_id, shard_size, valid_idx = row
+        shardt_copy[stud_id_low] = {
+            'Shard_id': shard_id,
+            'Shard_size': shard_size,
+            'valid_idx': valid_idx
+        }
+
     # finding the corresponding shard
-    possible_stud_id_low = lower_bound_entry(ShardT, Stud_id)
+    possible_stud_id_low = lower_bound_entry(shardt_copy, Stud_id)
     shard_id = -1
-    for key, value in dropwhile(lambda item: item[0] < possible_stud_id_low, ShardT.items()):
+    for key, value in dropwhile(lambda item: item[0] < possible_stud_id_low, shardt_copy.items()):
         if Stud_id >= key:
             if Stud_id >= key and Stud_id < key + value['Shard_size']:
                 shard_id = value['Shard_id']
@@ -1236,16 +1471,31 @@ def update():
 
 @app.route('/del', methods=['DELETE'])
 def delete():
-    global ShardT
     global shard_id_to_delete_request_queue
 
     payload = request.json
     Stud_id = payload['Stud_id']
 
+    query = f"SELECT * FROM ShardT"
+    db_connection = connection_pool.get_connection()
+    cursor = db_connection.cursor()
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    cursor.close()
+    connection_pool.return_connection(db_connection)
+    shardt_copy=SortedDict()
+    for row in rows:
+        stud_id_low, shard_id, shard_size, valid_idx = row
+        shardt_copy[stud_id_low] = {
+            'Shard_id': shard_id,
+            'Shard_size': shard_size,
+            'valid_idx': valid_idx
+        }
+
     # finding the corresponding shard
-    possible_stud_id_low = lower_bound_entry(ShardT, Stud_id)
+    possible_stud_id_low = lower_bound_entry(shardt_copy, Stud_id)
     shard_id = -1
-    for key, value in dropwhile(lambda item: item[0] < possible_stud_id_low, ShardT.items()):
+    for key, value in dropwhile(lambda item: item[0] < possible_stud_id_low, shardt_copy.items()):
         if Stud_id >= key:
             if Stud_id >= key and Stud_id < key + value['Shard_size']:
                 shard_id = value['Shard_id']

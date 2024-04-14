@@ -10,14 +10,118 @@ from sortedcontainers import SortedDict
 from itertools import dropwhile
 import re
 
+import psycopg2
+from psycopg2 import errorcodes
+import queue
 
 app = Flask(__name__)
 
 print("shard manager is running!!!")
+time.sleep(10)
+
+class ConnectionPool:
+    # def __init__(self, db_params, max_connections=5):
+    def __init__(self,max_connections):
+        # self.db_params = db_params
+        self.max_connections = max_connections
+        self.connection_pool = queue.Queue(max_connections)
+        self.connected=False
+        self._initialize_pool()
+
+    def open_connection(self):
+        db_connection=None
+        try:
+            db_connection = psycopg2.connect(
+                host=db_name,
+                user="postgres",
+                password="abc",
+                # database="distributed_database"
+            )
+        except Exception as e:
+            print(f"Error connecting to database:{str(e)}",500)
+            return False
+        
+        cursor = db_connection.cursor()
+        cursor.execute("SELECT datname FROM pg_catalog.pg_database WHERE datname = 'distributed_database';")
+        db_connection.commit()
+        if cursor.fetchone() is None:
+            db_connection.autocommit = True
+            create_database_query="CREATE DATABASE distributed_database;"
+            cursor.execute(create_database_query)
+            db_connection.commit()
+        
+        cursor.close()
+        db_connection.close()
+
+        db_connection = psycopg2.connect(
+            host=db_name,
+            user="postgres",
+            password="abc",
+            database="distributed_database"
+        )
+        print("Connected to database")
+        self.connection_pool.put(db_connection)
+        return True
+
+    def return_connection(self,db_connection):
+        self.connection_pool.put(db_connection)
+
+    def _initialize_pool(self):
+        for _ in range(self.max_connections):
+            opened=False
+            while(not opened):
+                opened=self.open_connection()
+        self.connected=True
+
+    def get_connection(self):
+        return self.connection_pool.get()
+
+    def connection_status(self):
+        return self.connected
+
+    def close_all_connections(self):
+        while not self.connection_pool.empty():
+            db_connection = self.connection_pool.get()
+            db_connection.close()
+
+db_name = os.environ.get('DBNAME')
+connection_pool = ConnectionPool(max_connections=40)
+
+db_connection=None
+data_type_mapping = {
+    'Number': 'INT',   # Example mapping for 'Number' to 'INT'
+    'String': 'VARCHAR'  # Example mapping for 'String' to 'VARCHAR'
+}
+
+
+# max_retries = 5
+# retry_delay = 5
+# url = "http://shard_manager:5000/config"
+
+# for attempt in range(max_retries):
+#     try:
+#         response = requests.post(url, json={})
+#         if response.status_code == 200:
+#             print("Request successful!")
+#             break
+#         else:
+#             print(f"Request failed with status code {response.status_code}. Retrying...")
+    
+#     except requests.exceptions.ConnectionError as e:
+#         # If a connection error occurs, log the error and retry after a delay
+#         print(f"Connection error: {e}. Retrying...")
+#     # Wait for the specified delay before retrying
+#     time.sleep(retry_delay)
+
+# print("Maximum number of retries reached. Unable to send request.")
+
+# response = requests.post("http://shard_manager:5000/config", json={})
+# print("Data inserted!!")
 
 def heartbeat():
     
-    print("heartbeat started")
+    print("heartbeat started") 
+    
     while True:
         time.sleep(10)
         respawn_server_names=[]
@@ -74,7 +178,13 @@ def heartbeat():
                     response = requests.post("http://load_balancer:5000/removeFromList", json={"server_names":server_name,"suggested_random_server_id":server_name_to_number[server_name]})
                     
                     for current_shard in server_name_to_shards[server_name]:
-                        response = requests.post("http://load_balancer:5000/removeFromList", json={"MapT":current_shard+","+server_name})
+                        query = f"DELETE FROM MapT WHERE Shard_id = '{current_shard}' AND Server_name = '{server_name}'"
+                        db_connection = connection_pool.get_connection()
+                        cursor = db_connection.cursor()
+                        cursor.execute(query)
+                        db_connection.commit()
+                        cursor.close()  
+                        connection_pool.return_connection(db_connection)
                         response = requests.post("http://load_balancer:5000/deleteFromDict", json={"shard_id_to_consistent_hashing": current_shard+","+server_name})
                     response = requests.post("http://load_balancer:5000/deleteFromDict", json={"server_name_to_shards": server_name})
             # print(f"Request done for server: {server_name}")
@@ -144,6 +254,7 @@ def heartbeat():
 
 # Create heartbeat thread
 threading.Thread(target=heartbeat, daemon=True).start()
+
 
 
 

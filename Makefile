@@ -14,6 +14,9 @@ clean:
 	@if [ -n "$$(docker ps -a -q --filter ancestor=distributed_systems_a-3-shard_manager)" ]; then \
 		docker rm -f $$(docker ps -a -q --filter ancestor=distributed_systems_a-3-shard_manager); \
 	fi
+	@if [ -n "$$(docker ps -a -q --filter ancestor=distributed_systems_a-3-metadata_db)" ]; then \
+		docker rm -f $$(docker ps -a -q --filter ancestor=distributed_systems_a-3-metadata_db); \
+	fi
 	@if [ -n "$$(docker ps -a -q --filter ancestor=distributed_systems_a-3-server)" ]; then \
 		docker rm -f $$(docker ps -a -q --filter ancestor=distributed_systems_a-3-server); \
 	fi
@@ -28,6 +31,9 @@ clean:
 	fi
 	@if [ -n "$$(docker images -q distributed_systems_a-3-shard_manager)" ]; then \
 		docker rmi -f distributed_systems_a-3-shard_manager; \
+	fi
+	@if [ -n "$$(docker images -q distributed_systems_a-3-metadata_db)" ]; then \
+		docker rmi -f distributed_systems_a-3-metadata_db; \
 	fi
 	@if [ -n "$$(docker images -q distributed_systems_a-3-db)" ]; then \
 		docker rmi -f distributed_systems_a-3-db; \
