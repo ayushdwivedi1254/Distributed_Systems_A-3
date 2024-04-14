@@ -17,7 +17,7 @@ import queue
 app = Flask(__name__)
 
 print("shard manager is running!!!")
-time.sleep(10)
+# time.sleep(10)
 
 class ConnectionPool:
     # def __init__(self, db_params, max_connections=5):
@@ -159,8 +159,9 @@ def heartbeat():
                 else:
                     print(f"Error: {response.status_code}, {response.text}")
 
-                if server_name not in removed_servers_copy:
+                if server_name not in removed_servers_copy: #The server is not removed by /rm so needs to be respawned
                     respawn_server_names.append(server_name)
+
                     response = requests.post(f"http://load_balancer:5000/readVariables", json=["server_name_to_shards","server_name_to_number"])
                     if response.status_code == 200:
                         response_data = response.json()
@@ -194,16 +195,20 @@ def heartbeat():
             new_names=[]
             
             servers_dict={}
+            respawned_servers_newname_to_oldname={}
+
             for serv in respawn_server_names:
                 num=random.randint(100000,999999)
                 name=f"Server{num}"
                 new_names.append(name)
                 servers_dict[name]=serv_to_shards[serv]
+                respawned_servers_newname_to_oldname[name]=serv
 
             payload = {
                 'n': servers_to_add,
                 'new_shards':[],
-                'servers' : servers_dict
+                'servers' : servers_dict,
+                'respawned_servers_newname_to_oldname':respawned_servers_newname_to_oldname,
             }
             # print("going to send payload")
             response = requests.post(
