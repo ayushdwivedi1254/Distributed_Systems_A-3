@@ -315,9 +315,6 @@ def get_logs():
 
 @app.route('/write_log', methods=['POST'])
 def write_log():
-    # global db_connection
-    # while db_connection is None:
-    #     connect_to_database()
 
     request_payload = request.json
     shard = request_payload.get('shard')
@@ -347,14 +344,14 @@ def write_log():
         queries=response_json.get("queries")
         
         db_connection=connection_pool.get_connection()
-
+        
         for query in queries:
             curr_idx=curr_idx+1
+            insert_query="INSERT INTO WAL (Shard_id, Log_id, Query) VALUES (%s, %s, %s) ON CONFLICT ON CONSTRAINT constraint_unique DO NOTHING"
             cursor = db_connection.cursor()
-            insert_query=f"INSERT INTO WAL (Shard_id , Log_id , Query ) VALUES ('{shard}', {curr_idx}, '{query}') ON CONFLICT ON CONSTRAINT constraint_unique DO NOTHING"
-            cursor.execute(insert_query)
+            cursor.execute(insert_query, (shard, curr_idx, query))
             db_connection.commit()
-            cursor.close() 
+            cursor.close()   
 
         for query in queries:
             valid_idx=valid_idx+1
