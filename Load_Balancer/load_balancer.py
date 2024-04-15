@@ -56,6 +56,8 @@ suggested_random_server_id = []
 suggested_random_server_id_lock = threading.Lock()
 removed_servers = []
 removed_servers_lock = threading.Lock()
+server_name_to_dbname={}
+server_name_to_dbname_lock=threading.Lock()
 
 lock = threading.Lock()
 server_name_lock = threading.Lock()
@@ -867,6 +869,12 @@ def add_server():
     n = payload.get('n')
     new_shards = payload.get('new_shards', [])
     servers = payload.get('servers', {})
+
+    try:
+        respawned_servers_newname_to_oldname=payload.get('respawned_servers_newname_to_oldname')
+    except Exception as e:
+        pass
+
     hostnames = list(payload.get('servers', {}).keys())
 
     # Check if Shard_id already exists
@@ -959,17 +967,34 @@ def add_server():
             name=f"Server{num}"
             valid_server_name[hostname]=name
             validname = valid_server_name[hostname]
-            dbname=validname+"_db"
+
+            respawn=False
+            dbname=None
+            server_oldname=None
+
+            if respawned_servers_newname_to_oldname is not None and respawned_servers_newname_to_oldname[hostname] is not None:
+                server_oldname=respawned_servers_newname_to_oldname[hostname]  #Getting the old name of the server which went down
+                dbname=server_name_to_dbname[server_oldname]    #Getting the database name of the old server
+                respawn=True
+            else:
+                dbname=validname+"_db"  #Otherwise create new database
+
+            if respawn==False:  #Only create DB Container if a new server is being added
+                res = os.popen(
+                    f'sudo docker run --name "{dbname}" --network distributed_systems_a-3_net1 --network-alias "{dbname}" -d distributed_systems_a-3-db').read()
+                
+                if len(res) == 0:
+                    response_json = {
+                        "message": f"<Error> Failed to start database for server {hostname}",
+                        "status": "failure"
+                    }
+                    return jsonify(response_json), 400
+            else:
+                with server_name_to_dbname_lock:
+                    del server_name_to_dbname[server_oldname]  #Popping the old servername to dbname association
             
-            res = os.popen(
-                f'sudo docker run --name "{dbname}" --network distributed_systems_a-3_net1 --network-alias "{dbname}" -d distributed_systems_a-3-db').read()
-            
-            if len(res) == 0:
-                response_json = {
-                    "message": f"<Error> Failed to start database for server {hostname}",
-                    "status": "failure"
-                }
-                return jsonify(response_json), 400
+            with server_name_to_dbname_lock:
+                server_name_to_dbname[hostname]=dbname  #Associating the db with the new server name
 
             res = os.popen(
                 f'sudo docker run --name "{validname}" --network distributed_systems_a-3_net1 --network-alias "{validname}" -e HOSTNAME="{validname}" -e SERVER_ID="{num}" -e DBNAME="{dbname}" -d distributed_systems_a-3-server').read()
@@ -1128,7 +1153,9 @@ def remove_server():
         res1 = os.system(f'sudo docker stop {validname}')
         res2 = os.system(f'sudo docker rm {validname}')
 
-        dbname=validname+"_db"
+        with server_name_to_dbname_lock:
+            dbname=server_name_to_dbname[hostname] #Get the name of the database associated with the server
+
         res3=os.system(f'sudo docker stop {dbname}')
         res4=os.system(f'sudo docker rm {dbname}')
 
@@ -1140,6 +1167,9 @@ def remove_server():
             with server_name_lock:
                 count+=1
             return jsonify(response_json), 400
+        
+        with server_name_to_dbname_lock:
+            del server_name_to_dbname[hostname]
         
         with server_name_lock:
             if hostname in server_names:
