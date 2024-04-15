@@ -45,7 +45,7 @@ COPY . /app
 
 # Install any needed packages specified in requirements.txt
 RUN pip install --upgrade pip --break-system-packages
-RUN pip install --trusted-host pypi.python.org flask --break-system-packages
+RUN pip install --trusted-host pypi.python.org flask requests --break-system-packages
 RUN pip install psycopg2-binary --break-system-packages
 RUN pip install mysql-connector-python --break-system-packages
 

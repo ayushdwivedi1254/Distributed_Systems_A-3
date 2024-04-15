@@ -410,9 +410,11 @@ def write_worker(current_shard_id):
             server_names_list = [row[0] for row in rows]
             threads = []
             for server_name in server_names_list:
+                print(server_name)
                 thread = threading.Thread(target=send_write_request, args=(server_name, write_payload, write_responses, error_message, failed_entries))
                 thread.start()
                 threads.append(thread)
+                break
 
             writes_successful = True
             error_status_code = 200

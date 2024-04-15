@@ -118,6 +118,76 @@ data_type_mapping = {
 # response = requests.post("http://shard_manager:5000/config", json={})
 # print("Data inserted!!")
 
+@app.route('/getSecondaryServers', methods=['POST'])
+def get_secondary_servers():
+    data = request.json
+    shard_id = data.get('shard_id')
+
+    response = requests.post(f"http://load_balancer:5000/readVariables", json=["valid_server_name"])
+    if response.status_code == 200:
+        response_data = response.json()
+        # current_server_names=response_data["server_names"]
+        valid_server_name=response_data["valid_server_name"]
+    else:
+        print(f"Error: {response.status_code}, {response.text}")
+
+    # # servers_list = [valid_server_name[key] for key in current_server_names if key in valid_server_name]
+
+    # # secondary_servers = servers_list[1:]
+
+    query = f"SELECT Server_name FROM MapT WHERE Shard_id = '{shard_id}';"
+    db_connection = connection_pool.get_connection()
+    cursor = db_connection.cursor()
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    cursor.close()
+    connection_pool.return_connection(db_connection)
+
+    secondary_servers = [row[0] for row in rows]
+    secondary_servers_valid = [valid_server_name[key] for key in secondary_servers]
+
+    # secondary_servers_valid = ["ab", "cd"]
+    print(secondary_servers_valid[1:])
+
+    response_data = {
+        'servers': secondary_servers_valid[1:]
+    }
+    return jsonify(response_data), 200
+
+@app.route('/getLogs', methods=['POST'])
+def get_logs():
+    data = request.json
+    shard_id = data.get('shard_id')
+    valid_idx_from = data.get('from')
+    valid_idx_to = data.get('to')
+
+    # extract primary server of shard_id
+    response = requests.post(f"http://load_balancer:5000/readVariables", json=["valid_server_name"])
+    if response.status_code == 200:
+        response_data = response.json()
+        # current_server_names=response_data["server_names"]
+        valid_server_name=response_data["valid_server_name"]
+    else:
+        print(f"Error: {response.status_code}, {response.text}")
+    query = f"SELECT Server_name FROM MapT WHERE Shard_id = '{shard_id}';"
+    db_connection = connection_pool.get_connection()
+    cursor = db_connection.cursor()
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    cursor.close()
+    connection_pool.return_connection(db_connection)
+    secondary_servers = [row[0] for row in rows]
+    primary_server = valid_server_name[secondary_servers[0]]
+    # send request to it
+    response=requests.post(f"http://{primary_server}:5000/getLogs",json={"shard_id": shard_id, "from":valid_idx_from, "to": valid_idx_to})
+    # forward the request as response
+    response_json = response.json()
+
+    response_data = {
+        'queries': response_json['queries']
+    }
+    return jsonify(response_data), 200
+
 def heartbeat():
     
     print("heartbeat started") 
@@ -255,8 +325,16 @@ def heartbeat():
 # Create heartbeat thread
 threading.Thread(target=heartbeat, daemon=True).start()
 
-
+# Catch-all endpoint
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'])
+def catch_all(path):
+    response = {
+        'error': 'Path not found',
+        'message': f'The requested path "{path}" does not exist on this server.'
+    }
+    return jsonify(response), 404
 
 
 if __name__ == '__main__':
-    app.run()
+    app.run(host='0.0.0.0', port=5000)

@@ -1,4 +1,6 @@
+import threading
 from flask import Flask, request,jsonify
+import requests
 import os,socket,subprocess,json
 # import mysql.connector
 import psycopg2
@@ -140,6 +142,29 @@ def config():
     schema = request_payload.get('schema', {})
     shards = request_payload.get('shards', [])
 
+    create_table_query = "CREATE TABLE IF NOT EXISTS WAL (Shard_id VARCHAR, Log_id INTEGER, Query TEXT, CONSTRAINT constraint_unique UNIQUE (Shard_id, Log_id))"
+    
+    # Execute the SQL query to create the table in the database
+    cursor = db_connection.cursor()
+    cursor.execute(create_table_query)
+    db_connection.commit()
+    cursor.close()
+    
+    create_table_query = "CREATE TABLE IF NOT EXISTS IDX (Shard_id VARCHAR, Curr_idx INTEGER, Valid_idx INTEGER)"
+    
+    # Execute the SQL query to create the table in the database
+    cursor = db_connection.cursor()
+    cursor.execute(create_table_query)
+    db_connection.commit()
+    cursor.close()
+
+    for shard_id in shards:
+        insert_query = "INSERT INTO IDX (Shard_id, Curr_idx, Valid_idx) VALUES (%s, %s, %s)"
+        cursor = db_connection.cursor()
+        cursor.execute(insert_query, (shard_id, 0, 0))
+        db_connection.commit()
+        cursor.close()    
+
     for shard in shards:
         # columns=""
         columns = ', '.join([f'"{col}" {data_type_mapping[dtype]}' for col, dtype in zip(schema['columns'], schema['dtypes'])])
@@ -264,76 +289,331 @@ def read():
 
     return jsonify(response_json), 200
 
-@app.route('/write', methods=['POST'])
-def write():
+@app.route('/getLogs', methods=['POST'])
+def get_logs():
+    data = request.json
+    shard_id = data.get('shard_id')
+    valid_idx_from = data.get('from')
+    valid_idx_to = data.get('to')
+
+    db_connection=connection_pool.get_connection()
+
+    select_query = f"SELECT Query FROM WAL WHERE Shard_id = '{shard_id}' AND Log_id >= {valid_idx_from} AND Log_id <= {valid_idx_to} ORDER BY Log_id ASC"
+    cursor = db_connection.cursor()
+    cursor.execute(select_query)
+    rows=cursor.fetchall()
+    cursor.close()
+
+    connection_pool.return_connection(db_connection)
+
+    queries = [row[0] for row in rows]
+
+    response_data = {
+        'queries': queries
+    }
+    return jsonify(response_data), 200
+
+@app.route('/write_log', methods=['POST'])
+def write_log():
     # global db_connection
     # while db_connection is None:
     #     connect_to_database()
 
     request_payload = request.json
     shard = request_payload.get('shard')
-    curr_idx = request_payload.get('curr_idx')
+    req_curr_idx = request_payload.get('curr_idx')
+    req_valid_idx = request_payload.get('valid_idx')
+    flag=request_payload.get('flag')
     data=request_payload.get('data',[])
 
-    old_curr_idx=curr_idx
+    query = f"SELECT Curr_idx, Valid_idx FROM IDX WHERE Shard_id = '{shard}'"
     
     db_connection=connection_pool.get_connection()
+
     cursor = db_connection.cursor()
+    cursor.execute(query)
+    row=cursor.fetchone()
+    cursor.close()
+
+    connection_pool.return_connection(db_connection)
+
+    curr_idx = row[0]
+    valid_idx = row[1]
+    
+    if valid_idx!=req_valid_idx and flag=="log":
+        # response = requests.post(f"http://shard_manager:5000/HEMLO1", json={"shard_id": shard})
+        response=requests.post("http://shard_manager:5000/getLogs",json={"shard_id": shard, "from":valid_idx+1, "to": req_valid_idx})
+        response_json=response.json()
+        queries=response_json.get("queries")
+        
+        db_connection=connection_pool.get_connection()
+
+        for query in queries:
+            curr_idx=curr_idx+1
+            cursor = db_connection.cursor()
+            insert_query=f"INSERT INTO WAL (Shard_id , Log_id , Query ) VALUES ('{shard}', {curr_idx}, '{query}') ON CONFLICT ON CONSTRAINT constraint_unique DO NOTHING"
+            cursor.execute(insert_query)
+            db_connection.commit()
+            cursor.close() 
+
+        for query in queries:
+            valid_idx=valid_idx+1
+            cursor = db_connection.cursor()
+            cursor.execute(query)
+            db_connection.commit()
+            cursor.close() 
+
+        update_query = f"UPDATE IDX SET Curr_idx = {curr_idx}, Valid_idx = {valid_idx} WHERE Shard_id = '{shard}'"
+        cursor = db_connection.cursor()
+        cursor.execute(update_query)
+        db_connection.commit()
+        cursor.close()
+        connection_pool.return_connection(db_connection)
+
+    if flag=="log":
+        query = f"SELECT Curr_idx, Valid_idx FROM IDX WHERE Shard_id = '{shard}'"
+
+        # Execute the SQL query to create the table in the database
+        db_connection=connection_pool.get_connection()
+        cursor = db_connection.cursor()
+        cursor.execute(query)
+        row=cursor.fetchone()
+        cursor.close()
+
+        curr_idx = row[0]
+        valid_idx = row[1]
+
+        connection_pool.return_connection(db_connection)
+
+        db_connection=connection_pool.get_connection()
+        # response = requests.post(f"http://shard_manager:5000/HEMLO2", json={"shard_id": shard})
+
+        for query in data:
+            curr_idx=curr_idx+1
+            insert_query="INSERT INTO WAL (Shard_id, Log_id, Query) VALUES (%s, %s, %s) ON CONFLICT ON CONSTRAINT constraint_unique DO NOTHING"
+            cursor = db_connection.cursor()
+            cursor.execute(insert_query, (shard, curr_idx, query))
+            db_connection.commit()
+            cursor.close()   
+
+        # response = requests.post(f"http://shard_manager:5000/HEMLO23", json={"shard_id": shard})
+
+        update_query = f"UPDATE IDX SET Curr_idx = {curr_idx} WHERE Shard_id = '{shard}'"
+        cursor = db_connection.cursor()
+        cursor.execute(update_query)
+        db_connection.commit()
+        cursor.close()
+        connection_pool.return_connection(db_connection)
+
+        # response = requests.post(f"http://shard_manager:5000/HEMLO3", json={"shard_id": shard})
+
+        response_json={
+            "flag": "log",
+            "status": "success"
+        }
+        return jsonify(response_json), 200
+
+    else:
+        # query = f"SELECT Curr_idx, Valid_idx FROM IDX WHERE Shard_id = '{shard}'"
+    
+        # # Execute the SQL query to create the table in the database
+        db_connection=connection_pool.get_connection()
+        # cursor = db_connection.cursor()
+        # cursor.execute(query)
+        # row=cursor.fetchone[0]
+        # cursor.close()
+
+        # curr_idx = row[0]
+        # valid_idx = row[1]
+        # response = requests.post(f"http://shard_manager:5000/HEMLO4", json={"shard_id": shard})
+
+        select_query = f"SELECT Query FROM WAL WHERE Shard_id = '{shard}' AND Log_id > {valid_idx} AND Log_id <= {curr_idx} ORDER BY Log_id ASC"
+        cursor = db_connection.cursor()
+        cursor.execute(select_query)
+        rows=cursor.fetchall()
+        cursor.close()
+
+        queries = [row[0] for row in rows]
+        for query in queries:
+            valid_idx=valid_idx+1
+            cursor = db_connection.cursor()
+            cursor.execute(query)
+            db_connection.commit()
+            cursor.close()
+
+        update_query = f"UPDATE IDX SET Valid_idx = {valid_idx} WHERE Shard_id = '{shard}'"
+        cursor = db_connection.cursor()
+        cursor.execute(update_query)
+        db_connection.commit()
+        cursor.close()
+        connection_pool.return_connection(db_connection)
+
+        # response = requests.post(f"http://shard_manager:5000/HEMLO5", json={"shard_id": shard})
+
+        response_json={
+            "flag": "commit",
+            "status": "success"
+        }
+        return jsonify(response_json), 200
+
+# Define a function to send requests to a server
+def send_request(server_name, data):
+    url = f"http://{server_name}:5000/write_log"
+    try:
+        response = requests.post(url, json=data)
+        return response.json(), 200
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.route('/write', methods=['POST'])
+def write():
+
+    request_payload = request.json
+    shard = request_payload.get('shard')
+    # curr_idx = request_payload.get('curr_idx')
+    data=request_payload.get('data',[])
+
+    # get the list of secondary servers from shard_manager
+
+    response = requests.post("http://shard_manager:5000/getSecondaryServers", json={"shard_id": shard})
+    response_json = response.json()
+    secondary_servers = response_json["servers"]
+    majority = (len(secondary_servers)+1)/2     # majority excluding primary
+
+    # for server in secondary_servers:
+    #     response = requests.post(f"http://shard_manager:5000/{server}", json={"shard_id": shard})
+
+    # loop to each server and send /write_log request
+    query = f"SELECT Curr_idx, Valid_idx FROM IDX WHERE Shard_id = '{shard}'"
+    db_connection=connection_pool.get_connection()
+
+    cursor = db_connection.cursor()
+    cursor.execute(query)
+    row=cursor.fetchone()
+    cursor.close()
+
+    connection_pool.return_connection(db_connection)
+
+    curr_idx = row[0]
+    valid_idx = row[1]
+    queries = []
 
     for entry in data:
         columns = ', '.join(['"' + key + '"' for key in entry.keys()])
         values = ', '.join(f'{value}' if isinstance(value,int) else f"'{value}'" for value in entry.values())
         insert_query=f'INSERT INTO {shard} ({columns}) VALUES ({values});'
-        # db_connection=None
-        try:
-            # while db_connection is None:
-            #     connect_to_database()
-            # db_connection=connection_pool.get_connection()
+        queries.append(insert_query)
 
-            # cursor = db_connection.cursor()
-            cursor.execute(insert_query)
-        except psycopg2.Error as e:
-            if e.pgcode==errorcodes.UNIQUE_VIOLATION:
-                curr_idx=old_curr_idx
-                response_json = {
-                    "message": f"Duplicate entry for student ID {entry['Stud_id']}",
-                    "failed_entries":data,
-                    "current_idx": curr_idx,
-                    "status": "failure"
-                }
-                cursor.close()
-                # db_connection=None
+    payload = {
+        "shard": shard,
+        "curr_idx": curr_idx,
+        "valid_idx": valid_idx,
+        "flag": "log",
+        "data": queries
+    }
 
-                # if db_connection is not None:
-                db_connection.close()
-                connection_pool.open_connection()
+    url = f"http://localhost:5000/write_log"
+    response = requests.post(url, json=payload)
 
-                return jsonify(response_json),409
-            else:
-                curr_idx=old_curr_idx
-                response_json = {
-                    "message": f"Error when writing into the database",
-                    "failed_entries":data,
-                    "current_idx": curr_idx,
-                    "status": "failure"
-                }
-                cursor.close()
-                # db_connection=None
+    print(response)
 
-                db_connection.close()
-                connection_pool.open_connection()
+    threads = []
 
-                return jsonify(response_json),500 
-        curr_idx+=1
+    # Create threads to send requests to each server
+    for server_name in secondary_servers:
+        thread = threading.Thread(target=lambda: send_request(server_name, payload))
+        threads.append(thread)
+        thread.start()
+
+    # Wait for threads to finish and collect responses
+    responses = 0
+    for thread in threads:
+        thread.join()
+        responses+=1
+        if responses >= majority:
+            break
+
+    # upon receiving responses from a majority, send /write_log request to commit them
+
+    payload["flag"] = "commit"
+    threads = []
+
+    # Create threads to send requests to each server
+    for server_name in secondary_servers:
+        thread = threading.Thread(target=lambda: send_request(server_name, payload))
+        threads.append(thread)
+        thread.start()
+
+    # Wait for threads to finish and collect responses
+    responses = 0
+    for thread in threads:
+        thread.join()
+        responses+=1
+        if responses >= majority:
+            break
+
+    # upon receiving responses from a majority, send /write_log to primary
+    url = f"http://localhost:5000/write_log"
+    response = requests.post(url, json=payload)
+
+    # old_curr_idx=curr_idx
     
-    cursor.close()
-    db_connection.commit()
-    # db_connection.close()
-    connection_pool.return_connection(db_connection)
+    # db_connection=connection_pool.get_connection()
+    # cursor = db_connection.cursor()
+
+    # for entry in data:
+    #     columns = ', '.join(['"' + key + '"' for key in entry.keys()])
+    #     values = ', '.join(f'{value}' if isinstance(value,int) else f"'{value}'" for value in entry.values())
+    #     insert_query=f'INSERT INTO {shard} ({columns}) VALUES ({values});'
+    #     # db_connection=None
+    #     try:
+    #         # while db_connection is None:
+    #         #     connect_to_database()
+    #         # db_connection=connection_pool.get_connection()
+
+    #         # cursor = db_connection.cursor()
+    #         cursor.execute(insert_query)
+    #     except psycopg2.Error as e:
+    #         if e.pgcode==errorcodes.UNIQUE_VIOLATION:
+    #             curr_idx=old_curr_idx
+    #             response_json = {
+    #                 "message": f"Duplicate entry for student ID {entry['Stud_id']}",
+    #                 "failed_entries":data,
+    #                 "current_idx": curr_idx,
+    #                 "status": "failure"
+    #             }
+    #             cursor.close()
+    #             # db_connection=None
+
+    #             # if db_connection is not None:
+    #             db_connection.close()
+    #             connection_pool.open_connection()
+
+    #             return jsonify(response_json),409
+    #         else:
+    #             curr_idx=old_curr_idx
+    #             response_json = {
+    #                 "message": f"Error when writing into the database",
+    #                 "failed_entries":data,
+    #                 "current_idx": curr_idx,
+    #                 "status": "failure"
+    #             }
+    #             cursor.close()
+    #             # db_connection=None
+
+    #             db_connection.close()
+    #             connection_pool.open_connection()
+
+    #             return jsonify(response_json),500 
+    #     curr_idx+=1
+    
+    # cursor.close()
+    # db_connection.commit()
+    # # db_connection.close()
+    # connection_pool.return_connection(db_connection)
         
     response_json = {
         "message": "Data entries added",
-        "current_idx": curr_idx,
         "status": "success"
     }
 
