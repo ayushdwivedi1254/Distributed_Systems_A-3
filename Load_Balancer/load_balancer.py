@@ -503,6 +503,7 @@ def update_worker(current_shard_id):
                 thread = threading.Thread(target=send_update_request, args=(server_name, update_payload, update_responses, error_message))
                 thread.start()
                 threads.append(thread)
+                break
 
             updates_successful = True
             error_status_code = 200
@@ -580,6 +581,7 @@ def delete_worker(current_shard_id):
                 thread = threading.Thread(target=send_delete_request, args=(server_name, delete_payload, delete_responses, error_message))
                 thread.start()
                 threads.append(thread)
+                break
 
             deletes_successful = True
             error_status_code = 200
