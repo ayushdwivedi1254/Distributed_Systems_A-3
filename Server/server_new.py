@@ -289,6 +289,31 @@ def read():
 
     return jsonify(response_json), 200
 
+@app.route('/getIndex', methods=['POST'])
+def get_index():
+    data = request.json
+    shard_id = data.get('shard_id')
+
+    query = f"SELECT Curr_idx, Valid_idx FROM IDX WHERE Shard_id = '{shard_id}'"
+    
+    db_connection=connection_pool.get_connection()
+
+    cursor = db_connection.cursor()
+    cursor.execute(query)
+    row=cursor.fetchone()
+    cursor.close()
+
+    connection_pool.return_connection(db_connection)
+
+    curr_idx = row[0]
+    valid_idx = row[1]
+
+    response_data = {
+        'curr_idx': curr_idx,
+        'valid_idx': valid_idx
+    }
+    return jsonify(response_data), 200
+
 @app.route('/getLogs', methods=['POST'])
 def get_logs():
     data = request.json
