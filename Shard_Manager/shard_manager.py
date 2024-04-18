@@ -118,6 +118,85 @@ data_type_mapping = {
 # response = requests.post("http://shard_manager:5000/config", json={})
 # print("Data inserted!!")
 
+# Define a function to send requests to a server
+def send_getIndex_request(server_name, data, response_dict, error_dict, valid_server_name):
+    url = f"http://{valid_server_name[server_name]}:5000/getIndex"
+    try:
+        response = requests.post(url, json=data)
+        response_dict[server_name]=response.json()
+    except Exception as e:
+        error_dict[server_name]=str(e)
+    
+@app.route('/primary_elect', methods=['GET'])
+def primary_elect():
+    data = request.json
+    shard_id = data.get('shard_id')
+
+    response = requests.post(f"http://load_balancer:5000/readVariables", json=["server_names","valid_server_name"])
+    if response.status_code == 200:
+        response_data = response.json()
+        current_server_names=response_data["server_names"]
+        valid_server_name=response_data["valid_server_name"]
+    else:
+        print(f"Error: {response.status_code}, {response.text}")
+
+    query = f"SELECT Server_name FROM MapT WHERE Shard_id = '{shard_id}';"
+    db_connection = connection_pool.get_connection()
+    cursor = db_connection.cursor()
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    cursor.close()
+    connection_pool.return_connection(db_connection)
+
+    servers_list= []
+    for row in rows:
+        if row[0] in current_server_names:
+            servers_list.append(row[0])
+
+    response_dict={}
+    error_dict={}
+    threads=[]
+    payload={
+        "shard_id":shard_id
+    }
+    for serv in servers_list:
+        thread = threading.Thread(target=send_getIndex_request, args=(serv,payload,response_dict,error_dict,valid_server_name))
+        threads.append(thread)
+        thread.start()
+
+    # Wait for all threads to complete
+    for thread in threads:
+        thread.join()
+
+    max_val=-1
+    max_curr=-1
+    primary_server_name=""
+    
+    for serv_name, response_data in response_dict.items():
+        if response_data:
+            curr_idx = response_data.get('curr_idx')
+            valid_idx = response_data.get('valid_idx')
+            if (valid_idx>max_val) or (valid_idx==max_val and curr_idx>max_curr):
+                primary_server_name=serv_name
+                max_val=valid_idx
+                max_curr=curr_idx
+
+    valid_primary=valid_server_name[primary_server_name]
+
+    update_query=f"UPDATE MapT SET Primary_server = '{valid_primary}' WHERE Shard_id = '{shard_id}';"
+    db_connection = connection_pool.get_connection()
+    cursor = db_connection.cursor()
+    cursor.execute(update_query)
+    db_connection.commit()
+    cursor.close()
+    connection_pool.return_connection(db_connection)
+    # Construct the response JSON
+    response = {
+        "primary_server": valid_primary
+    }
+    
+    return jsonify(response), 200
+
 @app.route('/getSecondaryServers', methods=['POST'])
 def get_secondary_servers():
     data = request.json
@@ -193,7 +272,7 @@ def heartbeat():
     print("heartbeat started") 
     
     while True:
-        time.sleep(10)
+        time.sleep(30)
         respawn_server_names=[]
         serv_to_shards={}
 
@@ -261,6 +340,24 @@ def heartbeat():
             # print(f"Request done for server: {server_name}")
 
         if len(respawn_server_names)>0:
+            # call primary elect if killed server is primary
+            for removed_serv in respawn_server_names:
+                query = f"SELECT Shard_id FROM MapT WHERE Primary_server = '{valid_server_name[removed_serv]}'"
+                db_connection = connection_pool.get_connection()
+                cursor = db_connection.cursor()
+                cursor.execute(query)
+                shards = cursor.fetchall()
+                cursor.close()
+                connection_pool.return_connection(db_connection)
+                if shards:
+                    for shrd in shards:
+                        shard_id=shrd[0]
+                        elect_response=requests.get("http://shard_manager:5000/primary_elect",json={"shard_id": shard_id})
+                        elect_json=elect_response.json()
+                        primary_server=elect_json.get("primary_server")
+                        print(f"{primary_server} is for shard {shard_id}")
+
+
             servers_to_add = len(respawn_server_names)
             new_names=[]
             

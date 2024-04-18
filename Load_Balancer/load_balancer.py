@@ -813,6 +813,16 @@ def initialize_database():
     if add_response.status_code != 200:
         return jsonify(add_response.json()), add_response.status_code     
     
+
+    # call primary elect if shard does not exist already
+    for shard in shards_list:
+        sh_id=shard['Shard_id']
+        if sh_id not in mapt_copy:
+            elect_response=requests.get("http://shard_manager:5000/primary_elect",json={"shard_id": sh_id})
+            elect_json=elect_response.json()
+            primary_server=elect_json.get("primary_server")
+            print(f"{primary_server} is for shard {sh_id}")
+
     # Responding with success message and status code 200
     response = {
         "message": "Configured Database",
@@ -1030,7 +1040,15 @@ def add_server():
             # populating MapT
             db_connection = connection_pool.get_connection()
             for current_shard in servers[hostname]:
-                query = f"INSERT INTO MapT (Shard_id, Server_name, Primary_server) VALUES ('{current_shard}','{hostname}', NULL)"
+                query = f"SELECT Primary_server FROM MapT WHERE Shard_id = '{current_shard}'"
+                cursor = db_connection.cursor()
+                cursor.execute(query)
+                primary_server = cursor.fetchone()
+                cursor.close()
+                if primary_server:
+                    query = f"INSERT INTO MapT (Shard_id, Server_name, Primary_server) VALUES ('{current_shard}','{hostname}', '{primary_server[0]}')"
+                else:
+                    query = f"INSERT INTO MapT (Shard_id, Server_name, Primary_server) VALUES ('{current_shard}','{hostname}', NULL)"
                 cursor = db_connection.cursor()
                 cursor.execute(query)
                 db_connection.commit()
@@ -1081,6 +1099,13 @@ def add_server():
                     }
                     response=requests.post(f"http://{valid_server_name[hostname]}:5000/write",json=payload)
 
+    for new_shard in new_shards:
+        shard_id = new_shard['Shard_id']
+        elect_response=requests.get("http://shard_manager:5000/primary_elect",json={"shard_id": shard_id})
+        elect_json=elect_response.json()
+        primary_server=elect_json.get("primary_server")
+        print(f"{primary_server} is for shard {shard_id}")
+        
     with server_name_lock:
         count_copy = count
 
@@ -1214,6 +1239,24 @@ def remove_server():
                 del server_name_to_shards[hostname] 
                 
         removed_server_name_list.append(hostname)
+
+    # call primary elect if removed server is primary
+    for removed_serv in removed_server_name_list:
+        query = f"SELECT Shard_id FROM MapT WHERE Primary_server = '{valid_server_name[removed_serv]}'"
+        db_connection = connection_pool.get_connection()
+        cursor = db_connection.cursor()
+        cursor.execute(query)
+        shards_list = cursor.fetchall()
+        cursor.close()
+        connection_pool.return_connection(db_connection)
+        if shards_list:
+            for shrd in shards_list:
+                shard_id=shrd[0]
+                elect_response=requests.get("http://shard_manager:5000/primary_elect",json={"shard_id": shard_id})
+                elect_json=elect_response.json()
+                primary_server=elect_json.get("primary_server")
+                print(f"{primary_server} is for shard {shard_id}")
+
 
     with server_name_lock:
         count_copy = count
