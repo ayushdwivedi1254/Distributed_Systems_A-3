@@ -401,29 +401,40 @@ def write_worker(current_shard_id):
         failed_entries = []
 
         with shard_id_to_write_request_lock[current_shard_id]:
-            query = f"SELECT Server_name FROM MapT WHERE Shard_id = '{current_shard_id}'"
+            # query = f"SELECT Server_name FROM MapT WHERE Shard_id = '{current_shard_id}'"
+            # db_connection = connection_pool.get_connection()
+            # cursor = db_connection.cursor()
+            # cursor.execute(query)
+            # rows = cursor.fetchall()
+            # cursor.close()  
+            # connection_pool.return_connection(db_connection)
+
+            # server_names_list = [row[0] for row in rows]
+
+            query = f"SELECT primary_server FROM mapt WHERE shard_id = '{current_shard_id}';"
             db_connection = connection_pool.get_connection()
             cursor = db_connection.cursor()
             cursor.execute(query)
-            rows = cursor.fetchall()
-            cursor.close()  
+            row = cursor.fetchone()
+            cursor.close()
             connection_pool.return_connection(db_connection)
+            server_name = row[0]
 
-            server_names_list = [row[0] for row in rows]
-            threads = []
-            for server_name in server_names_list:
-                print(server_name)
-                thread = threading.Thread(target=send_write_request, args=(server_name, write_payload, write_responses, error_message, failed_entries))
-                thread.start()
-                threads.append(thread)
-                break
+            # threads = []
+            # for server_name in server_names_list:
+            print(server_name)
+            thread = threading.Thread(target=send_write_request, args=(server_name, write_payload, write_responses, error_message, failed_entries))
+            thread.start()
+            # threads.append(thread)
+                # break
 
             writes_successful = True
             error_status_code = 200
             
             # Wait for all threads to complete and collect the responses
-            for thread in threads:
-                thread.join()
+            # for thread in threads:
+            thread.join()
+
             for response in write_responses:
                 if response != 200:
                     writes_successful = False
@@ -489,28 +500,38 @@ def update_worker(current_shard_id):
         error_message = []
 
         with shard_id_to_write_request_lock[current_shard_id]:
-            query = f"SELECT Server_name FROM MapT WHERE Shard_id = '{current_shard_id}'"
+            # query = f"SELECT Server_name FROM MapT WHERE Shard_id = '{current_shard_id}'"
+            # db_connection = connection_pool.get_connection()
+            # cursor = db_connection.cursor()
+            # cursor.execute(query)
+            # rows = cursor.fetchall()
+            # cursor.close()  
+            # connection_pool.return_connection(db_connection)
+
+            query = f"SELECT primary_server FROM mapt WHERE shard_id = '{current_shard_id}';"
             db_connection = connection_pool.get_connection()
             cursor = db_connection.cursor()
             cursor.execute(query)
-            rows = cursor.fetchall()
-            cursor.close()  
+            row = cursor.fetchone()
+            cursor.close()
             connection_pool.return_connection(db_connection)
+            server_name = row[0]
 
-            server_names_list = [row[0] for row in rows]
-            threads = []
-            for server_name in server_names_list:
-                thread = threading.Thread(target=send_update_request, args=(server_name, update_payload, update_responses, error_message))
-                thread.start()
-                threads.append(thread)
-                break
+            # server_names_list = [row[0] for row in rows]
+            # threads = []
+            # for server_name in server_names_list:
+            thread = threading.Thread(target=send_update_request, args=(server_name, update_payload, update_responses, error_message))
+            thread.start()
+                # threads.append(thread)
+                # break
 
             updates_successful = True
             error_status_code = 200
             
             # Wait for all threads to complete and collect the responses
-            for thread in threads:
-                thread.join()
+            # for thread in threads:
+            thread.join()
+
             for response in update_responses:
                 if response != 200:
                     updates_successful = False
@@ -567,28 +588,38 @@ def delete_worker(current_shard_id):
         error_message = []
 
         with shard_id_to_write_request_lock[current_shard_id]:
-            query = f"SELECT Server_name FROM MapT WHERE Shard_id = '{current_shard_id}'"
+            # query = f"SELECT Server_name FROM MapT WHERE Shard_id = '{current_shard_id}'"
+            # db_connection = connection_pool.get_connection()
+            # cursor = db_connection.cursor()
+            # cursor.execute(query)
+            # rows = cursor.fetchall()
+            # cursor.close()  
+            # connection_pool.return_connection(db_connection)
+
+            query = f"SELECT primary_server FROM mapt WHERE shard_id = '{current_shard_id}';"
             db_connection = connection_pool.get_connection()
             cursor = db_connection.cursor()
             cursor.execute(query)
-            rows = cursor.fetchall()
-            cursor.close()  
+            row = cursor.fetchone()
+            cursor.close()
             connection_pool.return_connection(db_connection)
+            server_name = row[0]
 
-            server_names_list = [row[0] for row in rows]
-            threads = []
-            for server_name in server_names_list:
-                thread = threading.Thread(target=send_delete_request, args=(server_name, delete_payload, delete_responses, error_message))
-                thread.start()
-                threads.append(thread)
-                break
+            # server_names_list = [row[0] for row in rows]
+            # threads = []
+            # for server_name in server_names_list:
+            thread = threading.Thread(target=send_delete_request, args=(server_name, delete_payload, delete_responses, error_message))
+            thread.start()
+                # threads.append(thread)
+                # break
 
             deletes_successful = True
             error_status_code = 200
             
             # Wait for all threads to complete and collect the responses
-            for thread in threads:
-                thread.join()
+            # for thread in threads:
+            thread.join()
+
             for response in delete_responses:
                 if response != 200:
                     deletes_successful = False
@@ -831,7 +862,22 @@ def get_status():
     with server_name_lock:
         count_copy = count
     
-    shards_list = [{"Stud_id_low": details["Stud_id_low"], "Shard_id": shard_id, "Shard_size": details["Shard_size"]} for shard_id, details in shards.items()]
+    shards_list=[]
+    db_connection = connection_pool.get_connection()
+
+    for shard_id,details in shards.items():
+        cursor = db_connection.cursor()
+        query = f"SELECT Primary_server FROM MapT WHERE Shard_id = '{shard_id}';"
+        cursor.execute(query)
+        row=cursor.fetchone()
+        cursor.close()
+        shards_list.append({"Stud_id_low": details["Stud_id_low"], 
+                    "Shard_id": shard_id, 
+                    "Shard_size": details["Shard_size"],
+                    "primary_server":row[0]})
+        
+    connection_pool.return_connection(db_connection)
+        
     
     # Construct the response JSON
     response = {
@@ -1336,6 +1382,29 @@ def read_data():
     }
 
     return jsonify(response), 200
+
+@app.route('/read/<string:server_id>',methods=['GET'])
+def read_server(server_id):
+    query = f"SELECT shard_id FROM MapT WHERE server_name = '{server_id}'"
+    db_connection = connection_pool.get_connection()
+    cursor = db_connection.cursor()
+    cursor.execute(query)
+    shard_list = cursor.fetchall()
+    cursor.close()
+    connection_pool.return_connection(db_connection)
+
+    if not shard_list:
+        response={
+            "error":"Server does not exist / No shards configured for this server", 
+            "status":"failure"
+        }
+        return jsonify(response),404
+    
+    shards=[shard[0] for shard in shard_list]
+    payload = {"shards":shards}
+
+    response=requests.get(f"http://{valid_server_name[server_id]}:5000/copy",json=payload)
+    return jsonify(response.json()),response.status_code
 
 
 @app.route('/write', methods=['POST'])

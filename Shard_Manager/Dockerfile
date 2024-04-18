@@ -13,25 +13,27 @@ RUN pip install --upgrade pip --break-system-packages
 RUN pip install psycopg2-binary --break-system-packages
 RUN pip install mysql-connector-python --break-system-packages
 
-RUN apt-get update
-RUN apt-get -y install sudo
+# RUN apt-get update
+# RUN apt-get -y install sudo
 
-RUN apt-get -y install apt-transport-https ca-certificates curl gnupg2 software-properties-common
-RUN curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add -
-RUN add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable"
-RUN apt-get update
-RUN apt-get -y install docker-ce-cli
+# RUN apt-get -y install apt-transport-https ca-certificates curl gnupg2 software-properties-common
+# RUN curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add -
+# RUN add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/debian $(lsb_release -cs) stable"
+# RUN apt-get update
+# RUN apt-get -y install docker-ce-cli
 
-ENV USER=theuser
-RUN adduser --home /home/$USER --disabled-password --gecos GECOS $USER \
-  && echo "$USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/$USER \
-  && chmod 0440 /etc/sudoers.d/$USER \
-  && groupadd docker \
-  && usermod -aG docker $USER \
-  && chsh -s /bin/zsh $USER
-USER $USER
+# ENV USER=theuser
+# RUN adduser --home /home/$USER --disabled-password --gecos GECOS $USER \
+#   && echo "$USER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/$USER \
+#   && chmod 0440 /etc/sudoers.d/$USER \
+#   && groupadd docker \
+#   && usermod -aG docker $USER \
+#   && chsh -s /bin/zsh $USER
+# USER $USER
 
-ENV HOME=/home/$USER
+# ENV HOME=/home/$USER
+
+
 # RUN sudo apt-get -y install curl apt-transport-https ca-certificates software-properties-common
 # RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
 # RUN sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu jammy stable"

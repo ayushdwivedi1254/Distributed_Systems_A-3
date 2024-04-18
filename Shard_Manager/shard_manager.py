@@ -135,7 +135,7 @@ def get_secondary_servers():
 
     # # secondary_servers = servers_list[1:]
 
-    query = f"SELECT Server_name FROM MapT WHERE Shard_id = '{shard_id}';"
+    query = f"SELECT Server_name,Primary_server FROM MapT WHERE Shard_id = '{shard_id}';"
     db_connection = connection_pool.get_connection()
     cursor = db_connection.cursor()
     cursor.execute(query)
@@ -143,14 +143,14 @@ def get_secondary_servers():
     cursor.close()
     connection_pool.return_connection(db_connection)
 
-    secondary_servers = [row[0] for row in rows]
-    secondary_servers_valid = [valid_server_name[key] for key in secondary_servers]
-
-    # secondary_servers_valid = ["ab", "cd"]
-    print(secondary_servers_valid[1:])
+    secondary_servers=[]
+    for row in rows:
+        if row[0]!=row[1]:
+            secondary_servers.append(row[0])
+    secondary_servers_valid = [valid_server_name[server] for server in secondary_servers]
 
     response_data = {
-        'servers': secondary_servers_valid[1:]
+        'servers': secondary_servers_valid
     }
     return jsonify(response_data), 200
 
@@ -169,15 +169,15 @@ def get_logs():
         valid_server_name=response_data["valid_server_name"]
     else:
         print(f"Error: {response.status_code}, {response.text}")
-    query = f"SELECT Server_name FROM MapT WHERE Shard_id = '{shard_id}';"
+
+    query = f"SELECT Primary_server FROM MapT WHERE Shard_id = '{shard_id}';"
     db_connection = connection_pool.get_connection()
     cursor = db_connection.cursor()
     cursor.execute(query)
-    rows = cursor.fetchall()
+    row = cursor.fetchone()
     cursor.close()
     connection_pool.return_connection(db_connection)
-    secondary_servers = [row[0] for row in rows]
-    primary_server = valid_server_name[secondary_servers[0]]
+    primary_server = valid_server_name[row[0]]
     # send request to it
     response=requests.post(f"http://{primary_server}:5000/getLogs",json={"shard_id": shard_id, "from":valid_idx_from, "to": valid_idx_to})
     # forward the request as response
