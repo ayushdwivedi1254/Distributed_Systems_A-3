@@ -11,7 +11,7 @@ RUN pip install sortedcontainers
 RUN pip install --upgrade pip --break-system-packages
 # RUN pip install --trusted-host pypi.python.org flask --break-system-packages
 RUN pip install psycopg2-binary --break-system-packages
-RUN pip install mysql-connector-python --break-system-packages
+# RUN pip install mysql-connector-python --break-system-packages
 
 RUN apt-get update
 RUN apt-get -y install sudo

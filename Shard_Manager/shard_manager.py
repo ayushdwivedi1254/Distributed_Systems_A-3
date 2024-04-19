@@ -267,6 +267,41 @@ def get_logs():
     }
     return jsonify(response_data), 200
 
+@app.route('/getPrimaryIndex', methods=['POST'])
+def get_primary_index():
+    data = request.json
+    shard_id = data.get('shard_id')
+
+    response = requests.post(f"http://load_balancer:5000/readVariables", json=["valid_server_name"])
+    if response.status_code == 200:
+        response_data = response.json()
+        # current_server_names=response_data["server_names"]
+        valid_server_name=response_data["valid_server_name"]
+    else:
+        print(f"Error: {response.status_code}, {response.text}")
+
+    query = f"SELECT Primary_server FROM MapT WHERE Shard_id = '{shard_id}';"
+    db_connection = connection_pool.get_connection()
+    cursor = db_connection.cursor()
+    cursor.execute(query)
+    row = cursor.fetchone()
+    cursor.close()
+    connection_pool.return_connection(db_connection)
+    primary_server = valid_server_name[row[0]]
+    # connection_pool.return_connection(db_connection)
+    
+    response=requests.post(f"http://{primary_server}:5000/getIndex",json={"shard_id":shard_id})
+    response_data=response.json()
+
+    curr_idx = response_data.get("curr_idx")
+    valid_idx = response_data.get("valid_idx")
+
+    response_data = {
+        'curr_idx': curr_idx,
+        'valid_idx': valid_idx
+    }
+    return jsonify(response_data), 200
+
 def heartbeat():
     
     print("heartbeat started") 

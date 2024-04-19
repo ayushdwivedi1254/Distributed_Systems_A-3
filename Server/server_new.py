@@ -157,13 +157,28 @@ def config():
     cursor.execute(create_table_query)
     db_connection.commit()
     cursor.close()
-
+    curr_dict={}
+    valid_dict={}
     for shard_id in shards:
+        select_query=f"SELECT Curr_idx, Valid_idx FROM IDX WHERE Shard_id='{shard_id}'"
+        cursor = db_connection.cursor()
+        cursor.execute(select_query)
+        row=cursor.fetchone()
+        cursor.close()
+        # response = requests.post(f"http://shard_manager:5000/{row}", json={})
+        if row:
+            curr_dict[shard_id]=row[0]
+            valid_dict[shard_id]=row[1]
+            
+            # response = requests.post(f"http://shard_manager:5000/HEMLO1", json={})
+            continue
         insert_query = "INSERT INTO IDX (Shard_id, Curr_idx, Valid_idx) VALUES (%s, %s, %s)"
         cursor = db_connection.cursor()
         cursor.execute(insert_query, (shard_id, 0, 0))
         db_connection.commit()
-        cursor.close()    
+        cursor.close()
+        curr_dict[shard_id]=0
+        valid_dict[shard_id]=0    
 
     for shard in shards:
         # columns=""
@@ -187,6 +202,59 @@ def config():
     # db_connection.close()
     connection_pool.return_connection(db_connection)
 
+    # response = requests.post(f"http://shard_manager:5000/HEMLO2", json={})
+    
+    for shard_id in shards:
+        db_connection=connection_pool.get_connection()
+        try:
+
+            # response = requests.post(f"http://shard_manager:5000/HEMLO9", json={})
+            
+            index_response=requests.post("http://shard_manager:5000/getPrimaryIndex",json={"shard_id":shard_id})
+            response_data=index_response.json()
+            p_valid=response_data["valid_idx"]
+            p_curr=response_data["curr_idx"]
+
+            # response = requests.post(f"http://shard_manager:5000/HEMLO3", json={})
+
+            log_response=requests.post("http://shard_manager:5000/getLogs",json={"shard_id":shard_id,"from":valid_dict[shard_id]+1,"to":p_valid})
+            response_data=log_response.json()
+            queries=response_data["queries"]
+
+            # response = requests.post(f"http://shard_manager:5000/HEMLO4", json={})
+
+            for query in queries:
+                curr_dict[shard_id]=curr_dict[shard_id]+1
+                insert_query="INSERT INTO WAL (Shard_id, Log_id, Query) VALUES (%s, %s, %s) ON CONFLICT ON CONSTRAINT constraint_unique DO NOTHING"
+                cursor = db_connection.cursor()
+                cursor.execute(insert_query, (shard_id, curr_dict[shard_id], query))
+                db_connection.commit()
+                cursor.close()   
+
+            # response = requests.post(f"http://shard_manager:5000/HEMLO5", json={})
+
+            for query in queries:
+                valid_dict[shard_id]=valid_dict[shard_id]+1
+                cursor = db_connection.cursor()
+                cursor.execute(query)
+                db_connection.commit()
+                cursor.close()
+            
+            update_query = f"UPDATE IDX SET Curr_idx = {curr_dict[shard_id]}, Valid_idx = {valid_dict[shard_id]} WHERE Shard_id = '{shard_id}'"
+            cursor = db_connection.cursor()
+            cursor.execute(update_query)
+            db_connection.commit()
+            cursor.close()
+
+            # response = requests.post(f"http://shard_manager:5000/HEMLO6", json={})
+            connection_pool.return_connection(db_connection)
+        except Exception as e:
+            # response = requests.post(f"http://shard_manager:5000/HEMLO7", json={})
+            connection_pool.return_connection(db_connection)
+            return {"error": str(e)}
+
+    # response = requests.post(f"http://shard_manager:5000/HEMLO8", json={})
+    
     response_json = {
         "message": ", ".join([f"Server0:{shard}" for shard in shards]) + " configured",
         "status": "success"

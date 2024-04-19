@@ -1119,31 +1119,31 @@ def add_server():
                 with shard_id_to_consistent_hashing_lock[current_shard]:
                     shard_id_to_consistent_hashing[current_shard].add_server(num, hostname)
             
-            shard_data = {}
+            # shard_data = {}
 
-            for current_shard in server_name_to_shards[hostname]:
-                if current_shard not in shard_data:
-                    if current_shard in MapT_copy:
-                        for copy_serv in MapT_copy[current_shard]:
-                            payload = {
-                                "shards":[current_shard]
-                            }
-                            response=requests.get(f"http://{valid_server_name[copy_serv]}:5000/copy",json=payload)
-                            if response.status_code == 200:
-                                response_json = response.json()
+            # for current_shard in server_name_to_shards[hostname]:
+            #     if current_shard not in shard_data:
+            #         if current_shard in MapT_copy:
+            #             for copy_serv in MapT_copy[current_shard]:
+            #                 payload = {
+            #                     "shards":[current_shard]
+            #                 }
+            #                 response=requests.get(f"http://{valid_server_name[copy_serv]}:5000/copy",json=payload)
+            #                 if response.status_code == 200:
+            #                     response_json = response.json()
                                 
-                                sh_list = response_json.get(current_shard, [])
-                                shard_data[current_shard]=sh_list
-                                break
+            #                     sh_list = response_json.get(current_shard, [])
+            #                     shard_data[current_shard]=sh_list
+            #                     break
             
-            for current_shard in server_name_to_shards[hostname]:
-                if current_shard in shard_data:
-                    payload={
-                        "shard": current_shard,
-                        "curr_idx":0,
-                        "data":shard_data[current_shard]
-                    }
-                    response=requests.post(f"http://{valid_server_name[hostname]}:5000/write",json=payload)
+            # for current_shard in server_name_to_shards[hostname]:
+            #     if current_shard in shard_data:
+            #         payload={
+            #             "shard": current_shard,
+            #             "curr_idx":0,
+            #             "data":shard_data[current_shard]
+            #         }
+            #         response=requests.post(f"http://{valid_server_name[hostname]}:5000/write",json=payload)
 
     for new_shard in new_shards:
         shard_id = new_shard['Shard_id']
