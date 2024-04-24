@@ -1,4 +1,4 @@
-# Assignment 2: Implementing a Scalable Database with Sharding
+# Assignment 3: Implementing a Write-Ahead Logging for consistency in Replicated Database with Sharding
 
 ## Group Members:
 ### [Ayush Kumar Dwivedi](https://github.com/ayushdwivedi1254/) (20CS10084)  
@@ -81,12 +81,26 @@ We have implemented a design such that there is a separate thread for each shard
 
 We find the shards corresponding to the requests and send them to their respective threads.  
 
-Each thread puts a corresponding shard lock, sends the requests to all the servers containing this shard, and collects and sends the response from the servers.  
+Each thread puts a corresponding shard lock, sends the requests to the primary server containing this shard, and sends the response from the server.  
 
 ##### Handling Failure of containers
 
 We define a heartbeat thread in the load balancer that periodically sends requests to the `/heartbeat` endpoint of all the servers in `server_names`.  
 We count the number of responding containers and store the shard information of the down servers if and only if they aren't stopped via `/rm`. The `server_names` and `count` variables are updated accordingly. We then call `/add` for all those servers. We use `/copy` and `/write` to populate the newly created shard replicas in the new server.
+
+### Shard Manager Implementation
+
+Shard Manager now calls `/hearbeat` of servers. It also contains some extra utility endpoints like `/getPrimaryIndex` to get the current and valid indices of the primary server, `/getLogs` to extract the queries present in the logs of the primary server for a shard between the given indices, `/getSecondaryServers` to return the list of secondary servers for a given shard id, `/primary_elect` to elect the primary for a shard_id.  
+
+### WAL Design and Implementation
+
+We have optimized our code and design to ensure our servers are up and consistent most of the times, ensuring high recovery and availability:
+
+  **1.** __Implemented connection_pool:__ It acts as locks for connection to the database. Whenever any function needs access to the database, it takes a connection from the pool and esnures that each current executing request has a separate connection to the database.  
+  **2.** __Separated the docker containers for server and database:__ It ensures that database is not effected by server getting up and down manually. This approach is used in almost all practical implementations of a distributed database.  
+  **3.** __Special container for metadata:__ We have created a separate container for metadata, which contains MapT and ShardT. It can be accessed only by load balancer and shard manager.  
+  **4.** __Our definition for 'most up-to-date' log:__ We have defined our 'most up-to-date' log as the one which whose valid_idx is the maximum. We break ties by then choosing the log whose curr_idx is the maximum. If there are ties still, we choose randomly.  
+  **5.** __Ensured logs are up-to-date before each update:__  We ensure before each write/ update/ delete operation that the valid_idx of the current shard is up-to-date with the primary. If it is not so, we extract the missing entries from the primary and log and commit them before executing the current request.  
 
 ### Code Optimizations
 
@@ -94,29 +108,29 @@ We have optimized our code at almost every possible step. Some instances are as 
 
    **1.** In `/read`, we have maintained the complexity to O(number of shards) while searching for shards containing range: low, high. It is the mininmum possible, instead of iterating through complete list of shards.  
    **2.** We have implemented binary search to find the shard which contains the student ID in O(log(N)), where N is the number of shards  
-   **3.** We have ensured parallelism at every stage, ensuring read requests are completely parallel, as well as providing separate threads for each shard for write, update and delete requests. Moreover, for write, update and delete requests, we again create separate threads for with a shard-thread while sending requests to different servers.  
+   **3.** We have ensured parallelism at every stage, ensuring read requests are completely parallel, as well as providing separate threads for each shard for write, update and delete requests. Moreover, for write, update and delete requests, we again create separate threads for with a shard-thread while sending requests to different servers from primary.  
 
 ## Analysis  
 
 ### A-1  
 
-Read time:  
-Write time:  
+Read time:  52.39 s  
+Write time:  116.09 s  
 
 ### A-2 
 
-Read time:  
-Read speed up:  
-Write time:  
-Write speed down:  
+Read time:  51.08 s  
+Read speed up:  1.026  
+Write time:  160.13 s  
+Write speed down:  0.725  
 
 ### A-3
 
-Read time:  
-Read speed up:  
-Write time:  
-Write speed up:  
+Read time:  51.21 s  
+Read speed up:  1.023  
+Write time:  208.24 s  
+Write speed up:  0.557  
 
 ### A-4  
 
-We have tested all the endpoints of the load balancer including the `/add` and `/rm` endpoints. The heartbeat thread of the load balancer keeps monitoring the server containers and whenever a server is manually dropped, the heartbeat thread itself calls the `/add` endpoint and spawns new containers quickly to handle the load, copying the shard entries from the other replicas at the same time.  
+We have tested all the endpoints of the load balancer including the `/add` and `/rm` endpoints. The heartbeat thread of the shard manager keeps monitoring the server containers and whenever a server is manually dropped, the heartbeat thread itself calls the `/add` endpoint and spawns new containers quickly to handle the load, copying the shard entries from the primary if not dropped. It also calls `/primary_elect` if the primary server of a shard has been dropped.   
