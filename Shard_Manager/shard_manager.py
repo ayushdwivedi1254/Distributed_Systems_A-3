@@ -85,7 +85,7 @@ class ConnectionPool:
             db_connection.close()
 
 db_name = os.environ.get('DBNAME')
-connection_pool = ConnectionPool(max_connections=40)
+connection_pool = ConnectionPool(max_connections=10)
 
 db_connection=None
 data_type_mapping = {
@@ -307,7 +307,7 @@ def heartbeat():
     print("heartbeat started") 
     
     while True:
-        time.sleep(30)
+        time.sleep(240)
         respawn_server_names=[]
         serv_to_shards={}
 

@@ -1,0 +1,11 @@
+Total time required: 116.08699989318848 seconds - A-1 (Writes)
+Total time required: 52.38832116127014 seconds - A-1 (Reads)
+Total time required: 160.13056206703186 seconds - A-2 (Writes)
+Total time required: 51.0795795917511 seconds - A-2 (Reads)
+Total time required: 51.210901737213135 seconds - A-3 (Reads)
+Total time required: 208.244019491094990 seconds - A-3 (Writes)
+
+Read Speed up (A-3): 1.023
+Read Speed up (A-2): 1.026
+Write Speed up (A-2): 0.725 
+Write Speed up (A-3): 0.557

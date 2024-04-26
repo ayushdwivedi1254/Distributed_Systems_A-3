@@ -16,11 +16,11 @@ async def generate_requests():
     async with aiohttp.ClientSession() as session:
         tasks = []
         start_time = time.time()
-        for _ in range(10000):
+        for _ in range(500):
             data_entries = []
             # for _ in range(10):
                 # Generate a random data entry
-            num=randint(0, 16383)
+            num=randint(0, 24575)
             data_entry = {
                 "Stud_id": num,
                 "Stud_name": f"Student{num}",

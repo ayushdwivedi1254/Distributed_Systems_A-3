@@ -119,6 +119,26 @@ def generate_id(hostname):
             if new_id not in suggested_random_server_id:
                 suggested_random_server_id.append(new_id)
                 return new_id
+            
+def find_additional_servers(server_name_to_shards,server_count,current_servers): #Find additional servers to add the shard to
+    
+    servers = [""]*server_count
+    server_shard_count = [float('inf')] * server_count
+    
+    for server_name, shards_list in server_name_to_shards.items():
+        if(server_name in current_servers): # If the shard is already present in the server then don't add it to that server again
+            continue
+
+        for i in range(server_count): #Finds the servers with the lowest number of shards
+            if len(shards_list) < server_shard_count[i]:
+                server_shard_count.insert(i, len(shards_list))
+                servers.insert(i, server_name) #Putting the server name at appropriate position
+                server_shard_count.pop()
+                servers.pop()
+                break
+    
+    return servers
+
 ################################################################################################
 
 
@@ -287,7 +307,7 @@ class ConnectionPool:
             db_connection.close()
 
 db_name = os.environ.get('DBNAME')
-connection_pool = ConnectionPool(max_connections=40)
+connection_pool = ConnectionPool(max_connections=89)
 
 db_connection=None
 data_type_mapping = {
@@ -968,6 +988,18 @@ def add_server():
         }
         return jsonify(response_json), 400
     
+    shard_id_to_additional_servers_count={}  #Finding whether the replication factor for any shard is less than 3
+    for new_shard in new_shards:
+        shard_id = new_shard['Shard_id']
+        server_count=0
+        for hostname in hostnames:
+            shards_list=servers[hostname]
+            for new_server_shard_id in shards_list:
+                if(shard_id==new_server_shard_id):
+                    server_count+=1
+        if(server_count<3):
+            shard_id_to_additional_servers_count[shard_id]=3-server_count
+
     with server_name_lock:
         server_names_copy = server_names
    
@@ -1144,6 +1176,47 @@ def add_server():
             #             "data":shard_data[current_shard]
             #         }
             #         response=requests.post(f"http://{valid_server_name[hostname]}:5000/write",json=payload)
+
+    db_connection = connection_pool.get_connection()
+
+    for shard_id,server_count in shard_id_to_additional_servers_count.items(): # Adding the additional servers to the MapT
+        
+        current_servers=[] # List of servers in which the shard is already present, we will not add the shard to these servers
+        for server in servers:
+            for s_id in servers[server]:
+                if(s_id==shard_id):
+                    current_servers.append(server)
+
+        additional_servers=find_additional_servers(server_name_to_shards,server_count,current_servers)
+        for additional_server in additional_servers:
+            query = f"INSERT INTO MapT (Shard_id, Server_name, Primary_server) VALUES ('{shard_id}','{additional_server}', NULL)"
+            cursor = db_connection.cursor()
+            cursor.execute(query)
+            db_connection.commit()
+            cursor.close()
+            server_name_to_shards[additional_server].append(shard_id)
+
+            # Configure this new shard into the already existing server
+            config_payload = {
+                "schema": schema,
+                "shards": [shard_id]
+            }
+            url = f'http://{valid_server_name[additional_server]}:5000/config'
+            config_response = requests.post(url, json=config_payload)
+            if config_response.status_code != 200:
+                return jsonify({
+                    "error": "Error configuring server {}: {}".format(hostname, config_response.text),
+                    "status": "error"
+                }), 400
+            
+            # get the server number
+            num = int(re.search(r'\d+', valid_server_name[additional_server]).group())
+            
+            # Add the server to the consistent hashing of the shard
+            with shard_id_to_consistent_hashing_lock[shard_id]:
+                shard_id_to_consistent_hashing[shard_id].add_server(num,additional_server)
+
+    connection_pool.return_connection(db_connection)
 
     for new_shard in new_shards:
         shard_id = new_shard['Shard_id']
