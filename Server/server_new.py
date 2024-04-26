@@ -84,7 +84,7 @@ class ConnectionPool:
             db_connection.close()
 
 db_name = os.environ.get('DBNAME')
-connection_pool = ConnectionPool(max_connections=99)
+connection_pool = ConnectionPool(max_connections=98)
 
 db_connection=None
 data_type_mapping = {

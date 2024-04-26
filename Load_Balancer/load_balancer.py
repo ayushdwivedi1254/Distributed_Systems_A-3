@@ -136,8 +136,9 @@ def find_additional_servers(server_name_to_shards,server_count,current_servers):
                 server_shard_count.pop()
                 servers.pop()
                 break
-    
-    return servers
+
+    non_empty_servers=[server for server in servers if server!=""]
+    return non_empty_servers
 
 ################################################################################################
 
@@ -307,7 +308,7 @@ class ConnectionPool:
             db_connection.close()
 
 db_name = os.environ.get('DBNAME')
-connection_pool = ConnectionPool(max_connections=89)
+connection_pool = ConnectionPool(max_connections=79)
 
 db_connection=None
 data_type_mapping = {
@@ -1284,13 +1285,84 @@ def remove_server():
 
     removed_server_name_list = []
 
+    hostname_list=[]
+    server_name_list=server_names.copy()
+    shard_count={}
     for i in range(0, n):
         hostname = None
 
         if i < len(hostnames):
             hostname = hostnames[i]
         else:
-            hostname = random.choice(server_names)
+            hostname = random.choice(server_name_list)
+            server_name_list.remove(hostname)
+        hostname_list.append(hostname)
+
+        for curr_shard in server_name_to_shards[hostname]:
+            if curr_shard in shard_count.keys():
+                shard_count[curr_shard]=shard_count[curr_shard]+1
+            else:
+                shard_count[curr_shard]=1
+
+    db_connection = connection_pool.get_connection()  #Find number of shards to add
+    shard_count_to_add={}
+    for curr_shard in shard_count.keys():
+        count_query = f"SELECT COUNT(*) FROM MapT WHERE Shard_id = '{curr_shard}'" 
+        cursor = db_connection.cursor()
+        cursor.execute(count_query)
+        count_result = cursor.fetchone()[0]
+        cursor.close()
+        shard_count_to_add[curr_shard]=max(0,3-(count_result-shard_count[curr_shard]))
+
+        current_servers=hostname_list.copy()
+        primary_server=None
+        query = f"SELECT Server_name,Primary_server FROM MapT WHERE Shard_id = '{curr_shard}'" 
+        cursor = db_connection.cursor()
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        cursor.close()
+        for row in rows:
+            primary_server=row[1]
+            current_servers.append(row[0])
+
+        additional_servers=find_additional_servers(server_name_to_shards,shard_count_to_add[curr_shard],current_servers)
+        for additional_server in additional_servers:
+            if primary_server:
+                query = f"INSERT INTO MapT (Shard_id, Server_name, Primary_server) VALUES ('{curr_shard}','{additional_server}', '{primary_server}')"
+            else:
+                query = f"INSERT INTO MapT (Shard_id, Server_name, Primary_server) VALUES ('{curr_shard}','{additional_server}', NULL)"
+            cursor = db_connection.cursor()
+            cursor.execute(query)
+            db_connection.commit()
+            cursor.close()
+            server_name_to_shards[additional_server].append(curr_shard)
+
+            # Configure this new shard into the already existing server
+            config_payload = {
+                "schema": schema,
+                "shards": [curr_shard]
+            }
+            url = f'http://{valid_server_name[additional_server]}:5000/config'
+            config_response = requests.post(url, json=config_payload)
+            if config_response.status_code != 200:
+                return jsonify({
+                    "error": "Error configuring server {}: {}".format(hostname, config_response.text),
+                    "status": "error"
+                }), 400
+            
+            # get the server number
+            num = int(re.search(r'\d+', valid_server_name[additional_server]).group())
+            
+            # Add the server to the consistent hashing of the shard
+            with shard_id_to_consistent_hashing_lock[curr_shard]:
+                shard_id_to_consistent_hashing[curr_shard].add_server(num,additional_server)
+
+    connection_pool.return_connection(db_connection)
+
+
+
+    for i in range(0, n):
+        hostname = hostname_list[i]
         with server_name_lock:
             count -= 1
         with removed_servers_lock:
